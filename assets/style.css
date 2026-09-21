@@ -1,0 +1,146 @@
+/* ============================================================
+   アンビエント・サイト 共通スタイル
+   全面キャンバスの上に、必要時だけ UI を浮かせる
+   ============================================================ */
+:root{
+  --bg:#05070d;
+  --fg:#e8ecf3;
+  --mut:#8f9bb0;
+  --acc:#7ab8ff;
+  --line:rgba(255,255,255,.10);
+  --panel:rgba(10,14,22,.86);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font-family:"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,system-ui,sans-serif;
+  overflow:hidden;-webkit-font-smoothing:antialiased;
+}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+
+#cv{position:fixed;inset:0;width:100%;height:100%;display:block;background:var(--bg)}
+
+/* ---- オーバーレイ UI ---- */
+#ui{
+  position:fixed;inset:0;z-index:10;pointer-events:none;
+  display:flex;flex-direction:column;justify-content:space-between;
+  transition:opacity .9s ease;
+}
+#ui.idle{opacity:0}
+#ui.hidden{display:none}
+/* UI 表示中だけ操作を受け付ける */
+#ui .bar,#ui .panel,#ui .toast{pointer-events:auto}
+#ui.idle{cursor:none}
+
+.bar{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 18px;
+  font-size:.84rem;
+}
+.bar.top{
+  background:linear-gradient(180deg,rgba(3,5,10,.72),rgba(3,5,10,0));
+}
+.bar.bottom{
+  background:linear-gradient(0deg,rgba(3,5,10,.78),rgba(3,5,10,0));
+  justify-content:flex-end;gap:10px;
+}
+.brand{font-weight:700;letter-spacing:.12em;font-size:.9rem;color:var(--fg)}
+.brand:hover{color:var(--acc);text-decoration:none}
+.tag{color:var(--mut);font-size:.8rem}
+.spacer{flex:1}
+.xlink{
+  font-size:.78rem;color:var(--mut);border:1px solid var(--line);
+  padding:5px 11px;border-radius:999px;transition:.18s;background:rgba(12,17,26,.5)
+}
+.xlink:hover{color:var(--acc);border-color:var(--acc);text-decoration:none}
+
+.keys{margin-right:auto;color:var(--mut);font-size:.76rem;letter-spacing:.02em}
+
+.ghost{
+  appearance:none;border:1px solid var(--line);background:rgba(12,17,26,.55);
+  color:var(--fg);font:inherit;font-size:.78rem;padding:6px 13px;border-radius:999px;
+  cursor:pointer;transition:.18s
+}
+.ghost:hover{border-color:var(--acc);color:var(--acc)}
+
+/* ---- シーン名（中央よりやや下。常時見たい人のために薄く残す） ---- */
+.sceneinfo{
+  position:absolute;left:50%;bottom:16%;transform:translateX(-50%);
+  text-align:center;pointer-events:none;max-width:min(680px,86vw)
+}
+.scenename{font-size:.95rem;letter-spacing:.14em;color:rgba(226,236,250,.5)}
+.scenedesc{margin-top:6px;font-size:.8rem;color:rgba(150,165,190,.42);line-height:1.6}
+#ui.idle .sceneinfo{opacity:.0;transition:opacity .9s}
+
+/* ---- トースト ---- */
+.toast{
+  position:absolute;left:50%;top:16%;transform:translate(-50%,-6px);
+  background:rgba(10,14,22,.82);border:1px solid var(--line);
+  color:var(--fg);font-size:.8rem;padding:8px 16px;border-radius:999px;
+  opacity:0;transition:opacity .25s,transform .25s;pointer-events:none
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ---- 設定パネル ---- */
+.panel{
+  position:absolute;left:50%;bottom:0;transform:translate(-50%,100%);
+  width:min(720px,94vw);
+  background:var(--panel);backdrop-filter:blur(14px);
+  border:1px solid var(--line);border-bottom:none;border-radius:16px 16px 0 0;
+  padding:18px 20px 22px;
+  transition:transform .32s cubic-bezier(.2,.8,.2,1);
+  box-shadow:0 -18px 50px rgba(0,0,0,.45);
+}
+.panel.open{transform:translate(-50%,0)}
+.prow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.plabel{font-size:.8rem;color:var(--mut);min-width:86px}
+.inline{font-size:.78rem;color:var(--mut)}
+.val{font-size:.78rem;color:var(--fg);min-width:46px;font-variant-numeric:tabular-nums}
+.chk{display:inline-flex;align-items:center;gap:7px;font-size:.8rem;color:var(--fg);cursor:pointer}
+.chk input{accent-color:var(--acc);width:15px;height:15px}
+.note{margin:10px 0 0;font-size:.76rem;color:var(--mut);line-height:1.7}
+.note.sub{color:#6f7a8c}
+
+/* シーンボタン */
+.scenebtns{display:flex;flex-wrap:wrap;gap:7px}
+.scbtn{
+  appearance:none;border:1px solid var(--line);background:rgba(16,22,33,.6);
+  color:var(--fg);font:inherit;font-size:.78rem;padding:6px 12px;border-radius:9px;
+  cursor:pointer;transition:.16s;display:inline-flex;align-items:center;gap:8px
+}
+.scbtn:hover{border-color:#3c4c68;background:#1a2331}
+.scbtn.on{border-color:var(--acc);background:rgba(122,184,255,.14);color:#cfe6ff}
+.scbtn .scn{font-variant-numeric:tabular-nums;opacity:.5;font-size:.7rem}
+
+/* range をダークテーマで見やすく */
+input[type=range]{
+  -webkit-appearance:none;appearance:none;height:4px;border-radius:999px;
+  background:linear-gradient(90deg,var(--acc) var(--pct,50%),rgba(255,255,255,.14) var(--pct,50%));
+  outline:none;flex:1 1 140px;min-width:120px;cursor:pointer
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+  background:#dfe9f8;border:2px solid var(--acc);cursor:pointer
+}
+input[type=range]::-moz-range-thumb{
+  width:13px;height:13px;border-radius:50%;background:#dfe9f8;border:2px solid var(--acc);cursor:pointer
+}
+select{
+  background:#131a26;color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:6px 9px;font:inherit;font-size:.8rem
+}
+
+@media(max-width:640px){
+  .tag{display:none}
+  .keys{font-size:.68rem}
+  .plabel{min-width:70px}
+  .sceneinfo{bottom:22%}
+}
+
+/* モーション低減設定の人は UI のアニメーションも抑える */
+@media(prefers-reduced-motion:reduce){
+  #ui,.panel,.toast,.scbtn,.ghost,.xlink{transition:none}
+}
