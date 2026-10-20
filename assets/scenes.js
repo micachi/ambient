@@ -819,9 +819,9 @@
 
         // 砂（下）
         c.beginPath();
-        var yBot = cy + (bot - cy) * botFill;
-        c.moveTo(cx - (halfW - neck) * (bot - yBot) / (bot - cy) - neck, yBot);
-        c.lineTo(cx + (halfW - neck) * (bot - yBot) / (bot - cy) + neck, yBot);
+        var yBot = bot - (bot - cy) * botFill;
+        c.moveTo(cx - (halfW - neck) * (yBot - cy) / (bot - cy) - neck, yBot);
+        c.lineTo(cx + (halfW - neck) * (yBot - cy) / (bot - cy) + neck, yBot);
         c.lineTo(cx + halfW, bot);
         c.lineTo(cx - halfW, bot);
         c.closePath();
@@ -836,8 +836,8 @@
           c.fillRect(gx, gy, 1, 1);
         }
 
-        // 落ちる筋
-        c.strokeStyle = "rgba(224,190,136,0.5)";
+        // 落ちる筋（上の砂が尽きたら消える）
+        c.strokeStyle = css(sandCol, (0.5 * Math.min(1, topFill * 4)).toFixed(3));
         c.lineWidth = 1;
         c.beginPath();
         c.moveTo(cx, cy - neck);
