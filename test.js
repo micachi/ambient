@@ -69,56 +69,60 @@ ok("全シーンに ja/en の名前・説明と frame がある", badMeta.length
 ok("ID が小英字のみのスラッグ", SCENES.every((s) => /^[a-z]+$/.test(s.id)),
   SCENES.map((s) => s.id).join(","));
 
-/* ---------- 3. ワードクロックの時刻→トークン ---------- */
-console.log("\n--- 3. ワードクロック ---");
-const word = SCENES.find((s) => s.id === "word");
-const T = word._test;
-ok("テスト用マッピングを公開している", !!T);
+/* ---------- 3. 時刻の表現（紙の漢数字 / 月相 / 雨の昼夜） ---------- */
+console.log("\n--- 3. 時刻と空 ---");
+const paper = SCENES.find((s) => s.id === "paper");
+const PT = paper && paper._test;
+ok("紙: テスト用マッピングを公開している", !!PT);
 
-const D = (h, m) => new Date(2026, 8, 21, h, m, 0);
-const has = (arr, ...k) => k.every((x) => arr.includes(x));
-
-ok("JA 00:00 → 午前・十二時・ちょうど", has(T.activeKeysJa(D(0, 0)), "am", "h12", "m0"),
-  T.activeKeysJa(D(0, 0)).join(","));
-ok("JA 12:00 → 午後・十二時", has(T.activeKeysJa(D(12, 0)), "pm", "h12", "m0"),
-  T.activeKeysJa(D(12, 0)).join(","));
-ok("JA 13:20 → 午後・一時・二十分", has(T.activeKeysJa(D(13, 20)), "pm", "h1", "m20"),
-  T.activeKeysJa(D(13, 20)).join(","));
-ok("JA 09:07 → 五分に丸めて h9 m5", has(T.activeKeysJa(D(9, 7)), "am", "h9", "m5"),
-  T.activeKeysJa(D(9, 7)).join(","));
-// 丸めで 60 分になったときは「時」も am/pm も繰り上げる
-ok("JA 11:59 → 正午に繰り上げ（午後・十二時・ちょうど）",
-  has(T.activeKeysJa(D(11, 59)), "pm", "h12", "m0"), T.activeKeysJa(D(11, 59)).join(","));
-ok("JA 23:59 → 深夜に繰り上げ（午前・十二時・ちょうど）",
-  has(T.activeKeysJa(D(23, 59)), "am", "h12", "m0"), T.activeKeysJa(D(23, 59)).join(","));
-
-ok("EN 00:00 → o'clock / past / night",
-  has(T.activeKeysEn(D(0, 0)), "m0", "past", "night"), T.activeKeysEn(D(0, 0)).join(","));
-ok("EN 02:37 → twentyfive to three",
-  has(T.activeKeysEn(D(2, 37)), "m25", "to", "h3"), T.activeKeysEn(D(2, 37)).join(","));
-ok("EN 02:52 → ten to three",
-  has(T.activeKeysEn(D(2, 52)), "m10", "to", "h3"), T.activeKeysEn(D(2, 52)).join(","));
-ok("EN 06:15 → quarter past six / morning",
-  has(T.activeKeysEn(D(6, 15)), "m15", "past", "h6", "morning"), T.activeKeysEn(D(6, 15)).join(","));
-ok("EN 18:30 → half past six / evening",
-  has(T.activeKeysEn(D(18, 30)), "m30", "past", "h6", "evening"), T.activeKeysEn(D(18, 30)).join(","));
-
-// 全 1440 分：返ってきたキーが必ず盤面に存在する（タイポ・欠落の検出）
-function keySet(rows) {
-  const s = new Set();
-  rows.forEach((r) => r.forEach((t) => s.add(t[1])));
-  return s;
-}
-const jaKeys = keySet(T.rowsJa), enKeys = keySet(T.rowsEn);
-const badJa = [], badEn = [];
+const TIME_RE = /^(零|一|二|三|四|五|六|七|八|九|十|十一|十二)時((五|十|十五|二十|二十五|三十|三十五|四十|四十五|五十|五十五)分)?$/;
+const badTime = [];
 for (let h = 0; h < 24; h++) {
   for (let m = 0; m < 60; m++) {
-    T.activeKeysJa(D(h, m)).forEach((k) => { if (!jaKeys.has(k)) badJa.push(`${h}:${m}→${k}`); });
-    T.activeKeysEn(D(h, m)).forEach((k) => { if (!enKeys.has(k)) badEn.push(`${h}:${m}→${k}`); });
+    const t = PT.kanjiTime({ h24: h, min: m });
+    if (!TIME_RE.test(t)) badTime.push(h + ":" + m + "→" + t);
   }
 }
-ok("JA: 全 1440 分でキーが盤面に存在", badJa.length === 0, badJa.slice(0, 4).join(" "));
-ok("EN: 全 1440 分でキーが盤面に存在", badEn.length === 0, badEn.slice(0, 4).join(" "));
+ok("紙: 全 1440 分が漢数字の時刻になる", badTime.length === 0, badTime.slice(0, 4).join(" "));
+ok("紙: 0 分は「時」で終わる（分を付けない）", PT.kanjiTime({ h24: 8, min: 0 }) === "八時",
+  PT.kanjiTime({ h24: 8, min: 0 }));
+ok("紙: 45 分は「四十五分」", PT.kanjiTime({ h24: 8, min: 45 }) === "八時四十五分",
+  PT.kanjiTime({ h24: 8, min: 45 }));
+ok("紙: 日付は漢数字（1・10・20・31 日）",
+  PT.kanjiDay(1) === "一日" && PT.kanjiDay(10) === "十日" &&
+  PT.kanjiDay(20) === "二十日" && PT.kanjiDay(31) === "三十一日",
+  [1, 10, 20, 31].map(PT.kanjiDay).join(","));
+ok("紙: 月名が漢数字", PT.MONTHS[9] === "十月", PT.MONTHS[9]);
+
+const moon = SCENES.find((s) => s.id === "moon");
+ok("月: 朔（2000-01-06）で照度がほぼ 0",
+  moon._test.phase(new Date(Date.UTC(2000, 0, 6, 18, 14))).illum < 0.02,
+  String(moon._test.phase(new Date(Date.UTC(2000, 0, 6, 18, 14))).illum));
+ok("月: 約 14.8 日後に満月（照度 > 0.98）",
+  moon._test.phase(new Date(Date.UTC(2000, 0, 21, 9, 0))).illum > 0.98,
+  String(moon._test.phase(new Date(Date.UTC(2000, 0, 21, 9, 0))).illum));
+ok("月: 照度は 0..1 に収まる", (() => {
+  for (let i = 0; i < 90; i++) {
+    const v = moon._test.phase(new Date(Date.UTC(2026, 0, 1) + i * 86400000)).illum;
+    if (!(v >= 0 && v <= 1)) return false;
+  }
+  return true;
+})());
+
+const rain = SCENES.find((s) => s.id === "rain");
+const SS = rain._test.skyState;
+ok("雨: 深夜は明るさ 0", SS({ h24: 23, min: 0 }).light === 0, JSON.stringify(SS({ h24: 23, min: 0 })));
+ok("雨: 正午は真昼（light > 1.1）", SS({ h24: 12, min: 0 }).light > 1.1, JSON.stringify(SS({ h24: 12, min: 0 })));
+ok("雨: 夕方は赤み（warm > 0.5）", SS({ h24: 18, min: 0 }).warm > 0.5, JSON.stringify(SS({ h24: 18, min: 0 })));
+ok("雨: 明けの赤みは控えめ（warm < 0.5）", SS({ h24: 6, min: 0 }).warm < 0.5, JSON.stringify(SS({ h24: 6, min: 0 })));
+ok("雨: 昼の赤みはほぼ 0", SS({ h24: 12, min: 0 }).warm < 0.05, JSON.stringify(SS({ h24: 12, min: 0 })));
+ok("雨: 明るさは 0..1.2 に収まる", (() => {
+  for (let h = 0; h < 48; h++) {
+    const v = SS({ h24: Math.floor(h / 2), min: (h % 2) * 30 }).light;
+    if (!(v >= 0 && v <= 1.2)) return false;
+  }
+  return true;
+})());
 
 /* ---------- 4. ドリフト（焼き付き防止） ---------- */
 console.log("\n--- 4. 焼き付き防止ドリフト ---");
@@ -193,14 +197,14 @@ ok("自動切替 ON が保存", JSON.parse(w.localStorage.getItem("ambient.setti
 
 /* ---------- 7. シーン切替とハッシュ ---------- */
 console.log("\n--- 7. 切替 / ハッシュ ---");
-app.switchTo("flow", true);
-ok("シーン切り替えが設定に反映", app.s.scene === "flow", app.s.scene);
-ok("ハッシュにシーン ID が乗る", (w.location.hash || "") === "#flow", w.location.hash);
+app.switchTo("deep", true);
+ok("シーン切り替えが設定に反映", app.s.scene === "deep", app.s.scene);
+ok("ハッシュにシーン ID が乗る", (w.location.hash || "") === "#deep", w.location.hash);
 ok("シーン名が UI に出る", /0\d\s\/\s0\d/.test(d.getElementById("sceneName").textContent),
   d.getElementById("sceneName").textContent);
 const btns = [...d.querySelectorAll("[data-scene]")];
 ok("設定パネルにシーンボタンが 6 個", btns.length === 6, String(btns.length));
-ok("現在のシーンがボタンで選択状態", btns.some((b) => b.classList.contains("on") && b.getAttribute("data-scene") === "flow"));
+ok("現在のシーンがボタンで選択状態", btns.some((b) => b.classList.contains("on") && b.getAttribute("data-scene") === "deep"));
 
 /* ---------- 8. ロケール / 相互リンク ---------- */
 console.log("\n--- 8. ロケールと相互リンク ---");

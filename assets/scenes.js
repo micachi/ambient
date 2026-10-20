@@ -1,55 +1,56 @@
 /* ============================================================
-   アンビエント・シーン集（Canvas 2D のみ／依存ゼロ）
-   長時間の表示を前提に、次のことを守っている
-     ・強い明滅をしない（輝度は徐々に変える）
-     ・動きは遅い（目の追従に優しさ）
-     ・焼き付き防止のドリフトはエンジン側で全体に加算される
+   Ambient v3 シーン集 — コンセプト「光が物質を通る」
+   月の窓 / 雨の窓 / 深海 / インク / 砂 / 紙
+   依存ゼロ・Canvas 2D。長時間表示の前提（明滅しない・遅い・暗い）を守る。
    ============================================================ */
 (function (global) {
   "use strict";
 
   var TAU = Math.PI * 2;
-  var clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
-  var lerp = function (a, b, t) { return a + (b - a) * t; };
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function hhmm(c) { return pad2(c.h24) + ":" + pad2(c.min); }
 
-  /* ---- 高速 sin 参照表（波干渉で 1フレーム数十万回呼ぶため） ---- */
-  var SINN = 4096;
-  var SINTAB = new Float32Array(SINN);
-  for (var i = 0; i < SINN; i++) SINTAB[i] = Math.sin((i / SINN) * TAU);
-  function fsin(x) {
-    var idx = (x * (SINN / TAU)) | 0;
-    return SINTAB[idx & (SINN - 1)];
-  }
-
-  /* ---- 値ノイズ（滑らかに補間される乱場） ---- */
+  /* ---- 値ノイズ ---- */
   function makeNoise(seed) {
     var s = (seed >>> 0) || 1;
-    var rnd = function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    function rnd() { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }
     var perm = new Uint8Array(256);
     for (var i = 0; i < 256; i++) perm[i] = i;
-    for (var j = 255; j > 0; j--) {
-      var k = (rnd() * (j + 1)) | 0;
-      var t = perm[j]; perm[j] = perm[k]; perm[k] = t;
-    }
+    for (var j = 255; j > 0; j--) { var k = (rnd() * (j + 1)) | 0, t = perm[j]; perm[j] = perm[k]; perm[k] = t; }
     var P = new Uint8Array(512);
     for (var m = 0; m < 512; m++) P[m] = perm[m & 255];
-    // ハッシュ値を -1..1 に落とす
-    var h1 = function (n) { return (((n * 1103515245 + 12345) >>> 8) & 0xffff) / 32768 - 1; };
-    var fade = function (t) { return t * t * (3 - 2 * t); };
+    function h1(n) { return (((n * 1103515245 + 12345) >>> 8) & 0xffff) / 32768 - 1; }
+    function fade(t) { return t * t * (3 - 2 * t); }
     return {
       rnd: rnd,
       n2: function (x, y) {
         var xi = Math.floor(x), yi = Math.floor(y);
         var X = xi & 255, Y = yi & 255;
         var u = fade(x - xi), v = fade(y - yi);
-        var aa = P[P[X] + Y], ab = P[P[X] + Y + 1];
-        var ba = P[P[X + 1] + Y], bb = P[P[X + 1] + Y + 1];
+        var aa = P[P[X] + Y], ab = P[P[X] + Y + 1], ba = P[P[X + 1] + Y], bb = P[P[X + 1] + Y + 1];
         return lerp(lerp(h1(aa), h1(ba), u), lerp(h1(ab), h1(bb), u), v);
-      },
+      }
     };
   }
 
-  /* ---- 全面塗り。ドリフトで端が空き所以外を覆う ---- */
+  /* ---- 柔らかい円を sprite に焼く（毎フレーム gradient を作らない） ---- */
+  function softSprite(size, rgb, inner) {
+    var c = document.createElement("canvas");
+    c.width = c.height = size;
+    var x = c.getContext("2d");
+    var r = size / 2;
+    var g = x.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, "rgba(" + rgb + "," + inner + ")");
+    g.addColorStop(0.45, "rgba(" + rgb + "," + (inner * 0.42) + ")");
+    g.addColorStop(1, "rgba(" + rgb + ",0)");
+    x.fillStyle = g;
+    x.fillRect(0, 0, size, size);
+    return c;
+  }
+
+  /* ---- 画面全体を覆う塗り（ドリフトで端が空かないよう余白付き） ---- */
   function fillAll(env, style) {
     var p = env.driftAmp + 2;
     env.ctx.fillStyle = style;
@@ -57,561 +58,891 @@
   }
 
   /* ============================================================
-     1. 残像秒針 — 長秒針を長い露光のように眺める
+     1. 月の窓 — 月相と雲、星。月の位置が時刻を語る
      ============================================================ */
-  function sceneTrail() {
+  function moonPhase(when) {
+    var synodic = 29.530588853;
+    var ref = Date.UTC(2000, 0, 6, 18, 14) / 86400000;
+    var nowd = when.getTime() / 86400000;
+    var phase = ((((nowd - ref) % synodic) + synodic) % synodic) / synodic;
+    return { phase: phase, illum: (1 - Math.cos(phase * TAU)) / 2 };
+  }
+
+  function sceneMoon() {
+    var noise = makeNoise(7);
     return {
-      id: "trail",
-      name: { ja: "残像秒針", en: "Trail Clock" },
-      desc: { ja: "秒針の軌跡を、長い露光のように残像で眺めます。", en: "The second hand, left to fade like a long exposure." },
+      id: "moon",
+      name: { ja: "月の窓", en: "Moon Window" },
+      desc: { ja: "月相と薄い雲。月の高さが時刻を語ります。", en: "A moon with its phase and thin cloud; its height tells the hour." },
+      _test: { phase: moonPhase },
 
       init: function (env) {
-        fillAll(env, "#070910");
-        this.ticks = [];
-        for (var i = 0; i < 60; i++) this.ticks.push(i);
+        fillAll(env, "#04060e");
+        this.stars = [];
+        var r = makeNoise(21);
+        for (var i = 0; i < 150; i++) {
+          this.stars.push({
+            x: r.rnd(), y: r.rnd() * 0.78,
+            s: 0.4 + r.rnd() * 1.1,
+            a: 0.10 + r.rnd() * 0.45,
+            ph: r.rnd() * TAU, sp: 0.05 + r.rnd() * 0.18
+          });
+        }
+        this.clouds = [];
+        for (var k = 0; k < 3; k++) {
+          this.clouds.push({ y: 0.20 + k * 0.14, sp: 0.018 + k * 0.008, ph: k * 1.7, a: 0.160 - k * 0.030 });
+        }
+        this.glow = softSprite(512, "214,222,238", 0.5);
       },
-      resize: function (env) { fillAll(env, "#070910"); },
+      resize: function (env) { fillAll(env, "#04060e"); },
 
       frame: function (env, dt) {
-        var c = env.ctx;
-        // 残像の消え残り方そのものがこのシーンの主役なので、薄く重ねるだけ
+        var c = env.ctx, w = env.w, h = env.h, t = env.t;
+        var ck = env.clock;
+
+        // 空
+        var g = c.createLinearGradient(0, -20, 0, h + 20);
+        g.addColorStop(0, "#04060e");
+        g.addColorStop(0.55, "#070c17");
+        g.addColorStop(1, "#0d1420");
+        c.fillStyle = g;
+        c.fillRect(-20, -20, w + 40, h + 40);
+
+        // 星（ゆっくり瞬く）
+        for (var i = 0; i < this.stars.length; i++) {
+          var st = this.stars[i];
+          var a = st.a * (0.62 + 0.38 * Math.sin(t * st.sp + st.ph));
+          c.fillStyle = "rgba(226,234,248," + a.toFixed(3) + ")";
+          c.fillRect(st.x * w, st.y * h, st.s, st.s);
+        }
+
+        // 月の位置: 18時=東の低い位置, 0時=南中, 6時=西の低い位置
+        var hours = ck.h24 + ck.min / 60;
+        var night = (hours >= 18 ? hours - 18 : hours + 6) / 12; // 0..1
+        var mx = w * (0.14 + 0.72 * night);
+        var my = h * (0.62 - Math.sin(Math.PI * clamp(night, 0, 1)) * 0.40);
+        var R = Math.min(w, h) * 0.155;
+
+        // 月暈
+        c.globalCompositeOperation = "lighter";
+        c.globalAlpha = 0.50 + 0.10 * Math.sin(t * 0.06);
+        c.drawImage(this.glow, mx - R * 3.1, my - R * 3.1, R * 6.2, R * 6.2);
+        c.globalAlpha = 1;
         c.globalCompositeOperation = "source-over";
-        fillAll(env, "rgba(7,9,16,0.055)");
 
-        var R = Math.min(env.w, env.h) * 0.33;
-        var cx = env.w / 2, cy = env.h / 2;
-        var sec = env.clock.sec + env.clock.ms / 1000;
-        var min = env.clock.min + sec / 60;
-        var hr = (env.clock.h24 % 12) + min / 60;
-
-        // 文字盤の目盛り（1時間は太く、5分ごとに長く）。常に同じ位置だと焼き付くので
-        // 全体ドリフトに任せるが、輝度は抑えてある。
+        // 月本体
         c.save();
-        c.translate(cx, cy);
-        for (var i = 0; i < 60; i++) {
-          var a = (i / 60) * TAU - Math.PI / 2;
-          var big = i % 5 === 0;
-          var r0 = R * (big ? 0.9 : 0.955);
-          var r1 = R * 0.99;
-          c.strokeStyle = big ? "rgba(150,175,215,0.20)" : "rgba(150,175,215,0.07)";
-          c.lineWidth = big ? 2 : 1;
+        c.beginPath();
+        c.arc(mx, my, R, 0, TAU);
+        c.clip();
+
+        var mg = c.createRadialGradient(mx - R * 0.25, my - R * 0.3, R * 0.1, mx, my, R);
+        mg.addColorStop(0, "#f2efe6");
+        mg.addColorStop(0.72, "#dcd8cc");
+        mg.addColorStop(1, "#b8b4a8");
+        c.fillStyle = mg;
+        c.fillRect(mx - R, my - R, R * 2, R * 2);
+
+        // 海（模様）— 静かに形を変える
+        for (var m = 0; m < 9; m++) {
+          var ang = m * 2.399 + Math.sin(t * 0.01 + m) * 0.05;
+          var rad = R * (0.18 + ((m * 37) % 100) / 240);
+          var px = mx + Math.cos(ang) * rad;
+          var py = my + Math.sin(ang) * rad * 0.82;
+          var pr = R * (0.16 + ((m * 53) % 100) / 520);
+          var pg = c.createRadialGradient(px, py, 0, px, py, pr);
+          pg.addColorStop(0, "rgba(150,148,140,0.30)");
+          pg.addColorStop(1, "rgba(150,148,140,0)");
+          c.fillStyle = pg;
+          c.beginPath(); c.arc(px, py, pr, 0, TAU); c.fill();
+        }
+
+        // 周辺減光
+        var ld = c.createRadialGradient(mx, my, R * 0.55, mx, my, R);
+        ld.addColorStop(0, "rgba(0,0,0,0)");
+        ld.addColorStop(1, "rgba(20,22,30,0.42)");
+        c.fillStyle = ld;
+        c.fillRect(mx - R, my - R, R * 2, R * 2);
+
+        // 月相 — 朔望月から照度を出し、影の円で欠けさせる
+        var mp = moonPhase(env.now);
+        var phase = mp.phase; // 0=新月 0.5=満月
+        var illum = mp.illum;
+        var shadowOffset = (1 - illum) * 2 * R;
+        var dir = phase < 0.5 ? 1 : -1;
+        c.fillStyle = "rgba(8,11,20,0.93)";
+        c.beginPath();
+        c.arc(mx + dir * shadowOffset, my, R * 1.02, 0, TAU);
+        c.fill();
+        c.restore();
+
+        // 雲（月を横切る薄い帯）
+        c.globalCompositeOperation = "source-over";
+        for (var ci = 0; ci < this.clouds.length; ci++) {
+          var cl = this.clouds[ci];
+          var baseY = h * cl.y;
+          for (var sIdx = 0; sIdx < 5; sIdx++) {
+            var span = w * 0.55;
+            var cx = ((t * cl.sp * w + sIdx * span * 0.5 + cl.ph * 300) % (w + span * 2)) - span;
+            var cy = baseY + noise.n2(sIdx * 3.1 + ci, t * 0.01) * h * 0.03;
+            var cw = span * (0.7 + 0.3 * Math.sin(sIdx + ci));
+            var chh = h * (0.035 + 0.012 * ci);
+            var cg = c.createRadialGradient(cx, cy, 0, cx, cy, cw * 0.5);
+            cg.addColorStop(0, "rgba(190,205,230," + cl.a.toFixed(3) + ")");
+            cg.addColorStop(1, "rgba(190,205,230,0)");
+            c.save();
+            c.translate(cx, cy);
+            c.scale(1, chh / (cw * 0.5));
+            c.fillStyle = cg;
+            c.beginPath(); c.arc(0, 0, cw * 0.5, 0, TAU); c.fill();
+            c.restore();
+          }
+        }
+
+        // 月を横切る薄い帯（動きがはっきり見えるように）
+        for (var v = 0; v < 2; v++) {
+          var vx = ((t * (0.020 + v * 0.013) * w + v * w * 0.55) % (w + R * 9)) - R * 4.5;
+          var vy = my + Math.sin(t * 0.07 + v * 2.1) * R * 0.16;
+          var vg = c.createRadialGradient(vx, vy, 0, vx, vy, R * 3.4);
+          vg.addColorStop(0, "rgba(206,218,238,0.14)");
+          vg.addColorStop(1, "rgba(206,218,238,0)");
+          c.save();
+          c.translate(vx, vy);
+          c.scale(1, 0.20);
+          c.fillStyle = vg;
+          c.beginPath(); c.arc(0, 0, R * 3.4, 0, TAU); c.fill();
+          c.restore();
+        }
+
+        // 時刻の弧（月の下に細く）
+        var frac = (ck.h24 + ck.min / 60) / 24;
+        c.strokeStyle = "rgba(226,234,248,0.18)";
+        c.lineWidth = 1;
+        c.beginPath();
+        c.arc(mx, my, R * 1.35, -Math.PI / 2, -Math.PI / 2 + TAU * frac);
+        c.stroke();
+      }
+    };
+  }
+
+  /* ============================================================
+     2. 雨の窓 — ガラスの向こうの街。明るさと色は時刻に連動する
+     夜 → 明け（いまの昼の明るさ） → 昼（さらに明るい） → 暮れ（赤） → 夜
+     ============================================================ */
+  function hexRgb(h) {
+    h = h.replace("#", "");
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  function lerpRgb(a, b, t) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  }
+  function css(rgb, alpha) {
+    var r = Math.round(clamp(rgb[0], 0, 255)), g = Math.round(clamp(rgb[1], 0, 255)), b = Math.round(clamp(rgb[2], 0, 255));
+    return alpha === undefined ? "rgb(" + r + "," + g + "," + b + ")" : "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+  }
+  /* 時刻 → { light: 0..1.15, warm: 0..1 } */
+  var SKY_KEYS = [
+    [4.5, 0.00, 0.00],
+    [6.0, 0.55, 0.40],
+    [7.5, 0.95, 0.12],
+    [12.0, 1.15, 0.00],
+    [16.0, 1.00, 0.05],
+    [18.0, 0.72, 0.60],
+    [19.5, 0.32, 0.50],
+    [21.0, 0.00, 0.00]
+  ];
+  function skyState(c) {
+    var h = c.h24 + c.min / 60;
+    if (h <= SKY_KEYS[0][0] || h >= SKY_KEYS[SKY_KEYS.length - 1][0]) return { light: 0, warm: 0 };
+    for (var i = 0; i < SKY_KEYS.length - 1; i++) {
+      var a = SKY_KEYS[i], b = SKY_KEYS[i + 1];
+      if (h >= a[0] && h <= b[0]) {
+        var t = (h - a[0]) / (b[0] - a[0]);
+        t = t * t * (3 - 2 * t);
+        return { light: a[1] + (b[1] - a[1]) * t, warm: a[2] + (b[2] - a[2]) * t };
+      }
+    }
+    return { light: 0, warm: 0 };
+  }
+  /* 夜 → 昼 → 真昼 の 3 段で色を作り、暮れは赤へ寄せる */
+  function skyShade(nightHex, dayHex, brightHex, light, warm) {
+    var night = hexRgb(nightHex), day = hexRgb(dayHex), bright = hexRgb(brightHex);
+    var t1 = clamp(light, 0, 1);
+    var rgb = lerpRgb(night, day, t1);
+    if (light > 1) rgb = lerpRgb(rgb, bright, clamp((light - 1) / 0.15, 0, 1));
+    if (warm > 0) rgb = lerpRgb(rgb, hexRgb("#e0915a"), warm * 0.40);
+    return rgb;
+  }
+
+  function sceneRain() {
+    return {
+      id: "rain",
+      name: { ja: "雨の窓", en: "Rain Window" },
+      desc: { ja: "ガラスの向こうの街。明けは淡く、昼は明るく、暮れは赤く。", en: "A city beyond the glass: pale at dawn, bright at noon, red at dusk." },
+      _test: { skyState: skyState },
+
+      buildBackground: function (env, light, warm) {
+        var w = env.w, h = env.h;
+        var cv = document.createElement("canvas");
+        cv.width = Math.max(2, Math.round(w));
+        cv.height = Math.max(2, Math.round(h));
+        var c = cv.getContext("2d");
+        var r = makeNoise(77);
+        var horizon = h * 0.63;
+
+        // 空
+        var sky = c.createLinearGradient(0, 0, 0, horizon);
+        sky.addColorStop(0, css(skyShade("#070c18", "#4d6479", "#7f9aad", light, warm)));
+        sky.addColorStop(0.65, css(skyShade("#0c1626", "#7b8f9f", "#a7bccb", light, warm)));
+        sky.addColorStop(1, css(skyShade("#1a2233", "#a9b8c2", "#d6e2e8", light, warm)));
+        c.fillStyle = sky;
+        c.fillRect(0, 0, w, horizon + 2);
+
+        // 霞（夜は暖かく、昼は白く、暮れは赤く）
+        var hazeCol = lerpRgb(lerpRgb(hexRgb("#ffc482"), hexRgb("#dfe8ee"), clamp(light, 0, 1)),
+                              hexRgb("#e0915a"), warm * 0.45);
+        var haze = c.createRadialGradient(w * 0.5, horizon, 0, w * 0.5, horizon, w * 0.75);
+        haze.addColorStop(0, css(hazeCol, (0.22 * (1 - clamp(light, 0, 1) * 0.45)).toFixed(3)));
+        haze.addColorStop(0.5, css(hazeCol, (0.08 * (1 - clamp(light, 0, 1) * 0.35)).toFixed(3)));
+        haze.addColorStop(1, css(hazeCol, 0));
+        c.fillStyle = haze;
+        c.fillRect(0, 0, w, h);
+
+        // 建物
+        var x = -w * 0.05;
+        var bldCol = skyShade("#060a12", "#5d707e", "#7d909c", light, warm);
+        var lit = clamp(1 - clamp(light, 0, 1) * 0.9, 0, 1);
+        while (x < w * 1.05) {
+          var bw = w * (0.02 + r.rnd() * 0.05);
+          var bh = h * (0.05 + r.rnd() * 0.20);
+          var by = horizon - bh;
+          c.fillStyle = css(bldCol, 0.96);
+          c.fillRect(x, by, bw, bh + h * 0.1);
+          var cols = Math.max(1, Math.floor(bw / (w * 0.011)));
+          var rows = Math.max(1, Math.floor(bh / (h * 0.028)));
+          for (var cy = 0; cy < rows; cy++) {
+            for (var cx = 0; cx < cols; cx++) {
+              if (r.rnd() < 0.30) continue;
+              var wx = x + (cx + 0.5) * (bw / cols);
+              var wy = by + (cy + 0.6) * (bh / rows);
+              var warmWin = r.rnd() < 0.72;
+              var wa = (0.30 + r.rnd() * 0.55) * lit;
+              if (wa <= 0.01) continue;
+              c.fillStyle = warmWin ? "rgba(255,214,165," + wa.toFixed(3) + ")"
+                                    : "rgba(170,205,255," + (wa * 0.7).toFixed(3) + ")";
+              c.fillRect(wx, wy, Math.max(1, w * 0.0035), Math.max(1, h * 0.005));
+            }
+          }
+          x += bw + w * (0.002 + r.rnd() * 0.01);
+        }
+
+        // 路面
+        var gnd = c.createLinearGradient(0, horizon, 0, h);
+        gnd.addColorStop(0, css(skyShade("#0a0f18", "#54646f", "#6f8089", light, warm)));
+        gnd.addColorStop(1, css(skyShade("#04070c", "#2c3a44", "#43525c", light, warm)));
+        c.fillStyle = gnd;
+        c.fillRect(0, horizon, w, h - horizon);
+
+        // 街灯（昼は消える）
+        var lampA = 0.85 * clamp(1 - clamp(light, 0, 1) * 0.95, 0, 1);
+        if (lampA > 0.01) {
+          for (var i = 0; i < 7; i++) {
+            var lx = w * (0.06 + i * 0.14) + r.rnd() * w * 0.03;
+            var ly = horizon + h * (0.02 + r.rnd() * 0.05);
+            var rad = Math.min(w, h) * (0.05 + r.rnd() * 0.06);
+            var warm2 = r.rnd() < 0.6;
+            var lg = c.createRadialGradient(lx, ly, 0, lx, ly, rad);
+            lg.addColorStop(0, warm2 ? "rgba(255,222,175," + lampA.toFixed(3) + ")"
+                                     : "rgba(195,228,255," + (lampA * 0.9).toFixed(3) + ")");
+            lg.addColorStop(0.35, warm2 ? "rgba(255,190,120," + (lampA * 0.35).toFixed(3) + ")"
+                                        : "rgba(150,200,250," + (lampA * 0.28).toFixed(3) + ")");
+            lg.addColorStop(1, "rgba(0,0,0,0)");
+            c.fillStyle = lg;
+            c.beginPath(); c.arc(lx, ly, rad, 0, TAU); c.fill();
+            c.save();
+            c.globalAlpha = 0.20 * lampA;
+            c.fillStyle = lg;
+            c.translate(lx, ly);
+            c.scale(1, 2.6);
+            c.beginPath(); c.arc(0, 0, rad * 0.55, 0, TAU); c.fill();
+            c.restore();
+          }
+        }
+        this.bg = cv;
+        this.bgLight = light;
+        this.bgWarm = warm;
+      },
+
+      init: function (env) {
+        fillAll(env, "#05070c");
+        var r = makeNoise(33);
+        var st = skyState(env.clock);
+        this.buildBackground(env, st.light, st.warm);
+
+        this.farRain = [];
+        for (var i = 0; i < 150; i++) {
+          this.farRain.push({
+            x: r.rnd(), y: r.rnd(),
+            len: 0.02 + r.rnd() * 0.05,
+            sp: 0.35 + r.rnd() * 0.9,
+            a: 0.05 + r.rnd() * 0.13
+          });
+        }
+        this.drops = [];
+        for (var d = 0; d < 44; d++) {
+          this.drops.push({ x: r.rnd(), y: r.rnd(), rr: 1.6 + r.rnd() * 4.0, next: 4 + r.rnd() * 40, run: 0, runY: 0 });
+        }
+        this.streaks = [];
+        for (var s2 = 0; s2 < 3; s2++) this.streaks.push({ x: 0.18 + s2 * 0.31, ph: r.rnd() * TAU });
+        this.ref = null; this.refText = "";
+      },
+      resize: function (env) { fillAll(env, "#05070c"); this.init(env); },
+
+      frame: function (env, dt) {
+        var c = env.ctx, w = env.w, h = env.h, t = env.t;
+        var st = skyState(env.clock);
+        if (!this.bg || Math.abs(st.light - this.bgLight) > 0.03 || Math.abs(st.warm - this.bgWarm) > 0.03) {
+          this.buildBackground(env, st.light, st.warm);
+        }
+
+        c.drawImage(this.bg, 0, 0, w, h);
+
+        // 遠景の雨（明るいほど見えにくい）
+        var rainA = 1 - clamp(st.light, 0, 1) * 0.55;
+        for (var i = 0; i < this.farRain.length; i++) {
+          var f = this.farRain[i];
+          f.y += f.sp * dt * 0.55;
+          if (f.y > 1.04) { f.y = -0.04; f.x = Math.random(); }
+          var fx = f.x * w, fy = f.y * h;
+          var fl = f.len * h;
+          c.strokeStyle = "rgba(200,218,238," + (f.a * rainA).toFixed(3) + ")";
+          c.lineWidth = 1;
           c.beginPath();
-          c.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
-          c.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
+          c.moveTo(fx, fy);
+          c.lineTo(fx - fl * 0.22, fy + fl);
           c.stroke();
+        }
+
+        // 映り込み（明るいほど薄い）
+        var txt = hhmm(env.clock);
+        if (!this.ref || this.refText !== txt) {
+          var fs = Math.round(Math.min(w, h) * 0.16);
+          var tmp = document.createElement("canvas");
+          var tw2 = Math.round(txt.length * fs * 0.62) + fs;
+          var th2 = Math.round(fs * 1.6);
+          tmp.width = tw2; tmp.height = th2;
+          var tx = tmp.getContext("2d");
+          tx.font = "300 " + fs + "px ui-monospace,Consolas,Menlo,monospace";
+          tx.textAlign = "center"; tx.textBaseline = "middle";
+          tx.fillStyle = "rgba(226,238,252,0.9)";
+          tx.fillText(txt, tw2 / 2, th2 / 2);
+          this.ref = tmp; this.refText = txt;
+        }
+        var rw = this.ref.width, rh = this.ref.height;
+        c.save();
+        c.translate(w * 0.5, h * 0.58);
+        c.scale(-1, 1);
+        c.globalAlpha = 0.16 * (1 - clamp(st.light, 0, 1) * 0.5);
+        c.shadowColor = "rgba(200,225,255,0.50)";
+        c.shadowBlur = 30;
+        var strip = 3;
+        for (var sy = 0; sy < rh; sy += strip) {
+          var wob = Math.sin(sy * 0.05 + t * 0.55) * 1.2 + Math.sin(sy * 0.017 - t * 0.31) * 0.8;
+          c.drawImage(this.ref, 0, sy, rw, strip, -rw / 2 + wob, -rh / 2 + sy, rw, strip);
         }
         c.restore();
 
-        var hand = function (ang, len, w, col, tail) {
+        // ガラスの膜
+        var film = c.createLinearGradient(0, 0, w * 0.6, h);
+        film.addColorStop(0, "rgba(120,160,210,0.05)");
+        film.addColorStop(0.5, "rgba(30,45,70,0.10)");
+        film.addColorStop(1, "rgba(10,16,28,0.16)");
+        c.fillStyle = film;
+        c.fillRect(-20, -20, w + 40, h + 40);
+
+        // 暮れの赤み（全体に薄く）
+        if (st.warm > 0.05) {
           c.save();
-          c.translate(cx, cy);
-          c.rotate(ang);
-          c.strokeStyle = col;
-          c.lineWidth = w;
-          c.lineCap = "round";
-          c.beginPath();
-          c.moveTo(-R * (tail || 0.12), 0);
-          c.lineTo(len, 0);
-          c.stroke();
+          c.globalCompositeOperation = "soft-light";
+          c.fillStyle = "rgba(236,146,78," + (st.warm * 0.26).toFixed(3) + ")";
+          c.fillRect(-20, -20, w + 40, h + 40);
           c.restore();
-        };
+        }
 
-        // 時・分は「在る」程度に。秒針だけが光る。
-        hand((hr / 12) * TAU - Math.PI / 2, R * 0.5, 4.5, "rgba(140,165,205,0.16)", 0.16);
-        hand((min / 60) * TAU - Math.PI / 2, R * 0.82, 3, "rgba(150,180,220,0.20)", 0.14);
-        hand((sec / 60) * TAU - Math.PI / 2, R * 0.94, 2, "rgba(120,190,255,0.85)", 0.18);
+        // 伝う筋
+        c.strokeStyle = "rgba(205,225,250,0.06)";
+        c.lineWidth = 1;
+        for (var s3 = 0; s3 < this.streaks.length; s3++) {
+          var sk = this.streaks[s3];
+          c.beginPath();
+          var sx = sk.x * w;
+          c.moveTo(sx, -10);
+          for (var yy = 0; yy <= h; yy += 24) c.lineTo(sx + Math.sin(yy * 0.01 + t * 0.08 + sk.ph) * 6, yy);
+          c.stroke();
+        }
 
-        // 中心の光
-        var g = c.createRadialGradient(cx, cy, 0, cx, cy, R * 0.09);
-        g.addColorStop(0, "rgba(190,220,255,0.55)");
-        g.addColorStop(1, "rgba(190,220,255,0)");
-        c.fillStyle = g;
-        c.beginPath();
-        c.arc(cx, cy, R * 0.09, 0, TAU);
-        c.fill();
-      },
+        // 手前の滴
+        for (var d2 = 0; d2 < this.drops.length; d2++) {
+          var dr = this.drops[d2];
+          dr.next -= dt;
+          if (dr.next <= 0) { dr.run = 1; dr.runY = 0; dr.next = 20 + Math.random() * 50; }
+          if (dr.run) {
+            dr.runY += dt * (0.012 + dr.rr * 0.002);
+            if (dr.runY > 0.35) { dr.run = 0; dr.y = Math.min(0.96, dr.y + dr.runY * 0.4); }
+          }
+          var dx = dr.x * w + Math.sin(t * 0.3 + d2) * 1.2;
+          var dy = (dr.y + dr.runY) * h;
+          var r2 = dr.rr * (Math.min(w, h) / 900 + 0.6);
+
+          c.strokeStyle = "rgba(10,16,26,0.55)";
+          c.lineWidth = Math.max(1, r2 * 0.5);
+          c.beginPath(); c.arc(dx, dy, r2, 0, TAU); c.stroke();
+          c.strokeStyle = "rgba(215,232,252,0.40)";
+          c.lineWidth = 1;
+          c.beginPath(); c.arc(dx, dy, r2, 0, TAU); c.stroke();
+          c.fillStyle = "rgba(240,248,255,0.70)";
+          c.beginPath(); c.arc(dx - r2 * 0.25, dy - r2 * 0.30, r2 * 0.30, 0, TAU); c.fill();
+          c.fillStyle = "rgba(255,255,255,0.14)";
+          c.beginPath(); c.arc(dx + r2 * 0.22, dy + r2 * 0.34, r2 * 0.24, 0, TAU); c.fill();
+
+          if (dr.runY > 0.002) {
+            c.strokeStyle = "rgba(200,220,245,0.09)";
+            c.beginPath(); c.moveTo(dx, dr.y * h); c.lineTo(dx, dy); c.stroke();
+          }
+        }
+
+        // 周辺減光
+        var vig = c.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.35, w * 0.5, h * 0.5, Math.max(w, h) * 0.78);
+        vig.addColorStop(0, "rgba(0,0,0,0)");
+        vig.addColorStop(1, "rgba(0,0,0," + (0.42 * (1 - clamp(st.light, 0, 1) * 0.45)).toFixed(3) + ")");
+        c.fillStyle = vig;
+        c.fillRect(-20, -20, w + 40, h + 40);
+      }
     };
   }
 
   /* ============================================================
-     2. 言葉の時計 — 文章として光る
+     3. 深海 — 光の柱と、舞い落ちる雪
      ============================================================ */
-  function sceneWord() {
-    // 分は 5 分刻みのトークン、正確な分は下部のプログレスで示す（ワードクロックの定石）
-    var JA = {
-      rows: [
-        [["今は", "now"], ["午前", "am"], ["午後", "pm"]],
-        [["一時", "h1"], ["二時", "h2"], ["三時", "h3"], ["四時", "h4"]],
-        [["五時", "h5"], ["六時", "h6"], ["七時", "h7"], ["八時", "h8"]],
-        [["九時", "h9"], ["十時", "h10"], ["十一時", "h11"], ["十二時", "h12"]],
-        [["ちょうど", "m0"], ["五分", "m5"], ["十分", "m10"], ["十五分", "m15"]],
-        [["二十分", "m20"], ["二十五分", "m25"], ["三十分", "m30"], ["三十五分", "m35"]],
-        [["四十分", "m40"], ["四十五分", "m45"], ["五十分", "m50"], ["五十五分", "m55"]],
-      ],
-      font: '"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif',
-    };
-    var EN = {
-      rows: [
-        [["IT IS", "now"], ["O'CLOCK", "m0"]],
-        [["FIVE", "m5"], ["TEN", "m10"], ["QUARTER", "m15"], ["TWENTY", "m20"]],
-        [["HALF", "m30"], ["TWENTYFIVE", "m25"], ["PAST", "past"], ["TO", "to"]],
-        [["ONE", "h1"], ["TWO", "h2"], ["THREE", "h3"], ["FOUR", "h4"]],
-        [["FIVE", "h5"], ["SIX", "h6"], ["SEVEN", "h7"], ["EIGHT", "h8"]],
-        [["NINE", "h9"], ["TEN", "h10"], ["ELEVEN", "h11"], ["TWELVE", "h12"]],
-        [["MORNING", "morning"], ["AFTERNOON", "afternoon"], ["EVENING", "evening"], ["NIGHT", "night"]],
-      ],
-      font: '"Helvetica Neue",Arial,system-ui,sans-serif',
-    };
-
-    // 分は 5 分刻みのトークンに丸め、正確な分は下部のプログレスで示す（ワードクロックの定石）。
-    // ただし丸めて 60 分になったときは「次の時」に繰り上げる
-    // （2:58 を 「2時ちょうど」と出さないため）。
-    var MIN_TOKENS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
-
-    /* 5 分丸めで分が 60 になった日は「時」側へ繰り上げる。
-       繰り上げは am/pm も含めて先に行う（23:59 を「午後」と出さないため）。 */
-    function roundUp(h24, m) {
-      var b = Math.round(m / 5);
-      if (b === 12) { b = 0; h24 = (h24 + 1) % 24; }
-      return { h24: h24, b: b };
-    }
-    function to12(h24) { var h = h24 % 12; return h === 0 ? 12 : h; }
-
-    function activeKeysJa(d) {
-      var r = roundUp(d.getHours(), d.getMinutes());
-      return ["now", r.h24 < 12 ? "am" : "pm", "h" + to12(r.h24), "m" + MIN_TOKENS[r.b]];
-    }
-
-    function activeKeysEn(d) {
-      var r = roundUp(d.getHours(), d.getMinutes());
-      var h12 = to12(r.h24);
-      var keys = ["now"];
-      if (r.b === 0) {
-        keys.push("m0", "past");
-      } else if (r.b <= 6) {
-        keys.push("m" + MIN_TOKENS[r.b], "past");
-      } else {
-        keys.push("m" + MIN_TOKENS[12 - r.b], "to");
-        h12 = h12 === 12 ? 1 : h12 + 1;
-      }
-      keys.push("h" + h12);
-      keys.push(r.h24 < 5 ? "night" : r.h24 < 12 ? "morning" : r.h24 < 18 ? "afternoon" : "evening");
-      return keys;
-    }
-
+  function sceneDeep() {
     return {
-      id: "word",
-      // テスト用に内部マッピングを公開（描画ロジックと切り離して検証するため）
-      _test: {
-        activeKeysJa: activeKeysJa, activeKeysEn: activeKeysEn, MIN_TOKENS: MIN_TOKENS,
-        rowsJa: JA.rows, rowsEn: EN.rows,
-      },
-      name: { ja: "言葉の時計", en: "Word Clock" },
-      desc: { ja: "時刻を文章で表示します。光る語が変わっていくのを眺めます。", en: "The time spelled out; watch which words light up." },
+      id: "deep",
+      name: { ja: "深海", en: "Deep Water" },
+      desc: { ja: "水面から差す光の柱と、ゆっくり沈む粒。", en: "Shafts of light from the surface and slow sinking motes." },
 
-      init: function () { this.fade = {}; },
-      resize: function () {},
+      init: function (env) {
+        fillAll(env, "#01060c");
+        var r = makeNoise(5);
+        this.motes = [];
+        for (var i = 0; i < 190; i++) {
+          this.motes.push({
+            x: r.rnd(), y: r.rnd(),
+            sp: 0.004 + r.rnd() * 0.012,
+            sw: 0.2 + r.rnd() * 0.7,
+            ph: r.rnd() * TAU,
+            sz: 0.6 + r.rnd() * 1.6,
+            a: 0.08 + r.rnd() * 0.34
+          });
+        }
+        this.shafts = [];
+        for (var k = 0; k < 6; k++) {
+          this.shafts.push({ x: 0.12 + k * 0.15, w: 0.03 + r.rnd() * 0.05, lean: -0.06 + r.rnd() * 0.12, ph: r.rnd() * TAU, a: 0.075 + r.rnd() * 0.085 });
+        }
+        this.mote = softSprite(64, "210,235,255", 0.9);
+      },
+      resize: function (env) { fillAll(env, "#01060c"); },
 
       frame: function (env, dt) {
-        var c = env.ctx;
-        fillAll(env, "#080a11");
-        var L = env.lang === "en" ? EN : JA;
-        var rows = L.rows;
-        var active = env.lang === "en" ? activeKeysEn(env.now) : activeKeysJa(env.now);
+        var c = env.ctx, w = env.w, h = env.h, t = env.t;
 
-        // 各行のトークン幅を測って、全体が画面に収まる字号を決める
-        var maxCols = 0, maxChars = 0;
-        rows.forEach(function (r) {
-          maxCols = Math.max(maxCols, r.length);
-          r.forEach(function (t) { maxChars = Math.max(maxChars, t[0].length); });
-        });
-        var fs = Math.min(
-          (env.w * 0.86) / (maxCols * 1.55),
-          (env.h * 0.72) / (rows.length * 1.5)
-        );
-        fs = Math.max(14, fs);
-        c.font = "600 " + fs.toFixed(1) + "px " + L.font;
+        var g = c.createLinearGradient(0, -20, 0, h + 20);
+        g.addColorStop(0, "#0a2b3d");
+        g.addColorStop(0.35, "#02101a");
+        g.addColorStop(1, "#000409");
+        c.fillStyle = g;
+        c.fillRect(-20, -20, w + 40, h + 40);
+
+        // 水面の明るみ
+        c.globalCompositeOperation = "lighter";
+        var sg = c.createRadialGradient(w * 0.34, -h * 0.1, 0, w * 0.34, -h * 0.1, Math.min(w, h) * 0.85);
+        sg.addColorStop(0, "rgba(150,215,245,0.12)");
+        sg.addColorStop(1, "rgba(150,215,245,0)");
+        c.fillStyle = sg;
+        c.fillRect(-20, -20, w + 40, h + 40);
+
+        // 光の柱（ゆっくり揺れる）
+        for (var i = 0; i < this.shafts.length; i++) {
+          var s = this.shafts[i];
+          var sway = Math.sin(t * 0.05 + s.ph) * 0.02;
+          var x0 = (s.x + sway) * w;
+          var wd = s.w * w;
+          var lg = c.createLinearGradient(0, 0, 0, h);
+          var a = s.a * (0.75 + 0.25 * Math.sin(t * 0.09 + s.ph));
+          lg.addColorStop(0, "rgba(185,235,255," + (a * 1.35).toFixed(3) + ")");
+          lg.addColorStop(0.55, "rgba(130,200,235," + (a * 0.32).toFixed(3) + ")");
+          lg.addColorStop(1, "rgba(120,190,230,0)");
+          c.fillStyle = lg;
+          c.beginPath();
+          c.moveTo(x0, -10);
+          c.lineTo(x0 + wd, -10);
+          c.lineTo(x0 + wd + s.lean * w, h + 10);
+          c.lineTo(x0 + s.lean * w - wd * 0.3, h + 10);
+          c.closePath();
+          c.fill();
+          // 柱の芯（細い高輝度）
+          var coreA = a * 1.6;
+          c.strokeStyle = "rgba(215,245,255," + Math.min(0.5, coreA).toFixed(3) + ")";
+          c.lineWidth = 1.2;
+          c.beginPath();
+          c.moveTo(x0 + wd * 0.5, -10);
+          c.lineTo(x0 + wd * 0.5 + s.lean * w * 0.45, h * 0.45);
+          c.stroke();
+        }
+        c.globalCompositeOperation = "source-over";
+
+        // マリンスノー
+        for (var m = 0; m < this.motes.length; m++) {
+          var p = this.motes[m];
+          p.y += p.sp * dt * 60;
+          if (p.y > 1.02) { p.y = -0.02; p.x = Math.random(); }
+          var px = (p.x + Math.sin(t * 0.15 + p.ph) * 0.004 * p.sw) * w;
+          var py = p.y * h;
+          var sz = p.sz * (Math.min(w, h) / 800 + 0.5) * 3;
+          c.globalAlpha = p.a;
+          c.drawImage(this.mote, px - sz, py - sz, sz * 2, sz * 2);
+        }
+        c.globalAlpha = 1;
+
+        // 時刻（水中ににじむ）
+        var ck = env.clock;
+        c.save();
+        c.globalAlpha = 0.20;
+        c.fillStyle = "#cfe9f7";
+        c.shadowColor = "rgba(160,220,245,0.6)";
+        c.shadowBlur = 22;
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.font = "200 " + Math.round(Math.min(w, h) * 0.17) + "px ui-monospace,Consolas,Menlo,monospace";
+        c.fillText(hhmm(ck), w * 0.5, h * 0.8);
+        c.restore();
+      }
+    };
+  }
+
+  /* ============================================================
+     4. インク — 水に落ちた墨がゆっくり咲く
+     ============================================================ */
+  function sceneInk() {
+    return {
+      id: "ink",
+      name: { ja: "インク", en: "Ink" },
+      desc: { ja: "水に落ちた墨が、ゆっくりと花のように開きます。", en: "Ink dropped in water, opening like a flower." },
+
+      init: function (env) {
+        fillAll(env, "#040404");
+        this.buf = document.createElement("canvas");
+        this.buf.width = Math.max(2, Math.round(env.w * 0.5));
+        this.buf.height = Math.max(2, Math.round(env.h * 0.5));
+        this.bc = this.buf.getContext("2d");
+        this.bc.fillStyle = "#040404";
+        this.bc.fillRect(0, 0, this.buf.width, this.buf.height);
+        this.noise = makeNoise(17);
+        this.parts = [];
+        this.emitters = [{ x: 0.42, y: 0.38, born: 0, life: 40, hue: "224,164,92" }, { x: 0.62, y: 0.55, born: 0, life: 34, hue: "111,199,194" }];
+        this.nextEmitter = 8;
+        this.dot = {};
+      },
+      resize: function (env) {
+        fillAll(env, "#040404");
+        this.init(env);
+      },
+
+      spawn: function (em) {
+        var n = 10 + ((Math.random() * 8) | 0);
+        for (var i = 0; i < n; i++) {
+          var a = Math.random() * TAU;
+          var sp = 0.0012 + Math.random() * 0.0035;
+          this.parts.push({
+            x: em.x + (Math.random() - 0.5) * 0.01,
+            y: em.y + (Math.random() - 0.5) * 0.01,
+            vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+            age: 0, life: 10 + Math.random() * 16, hue: em.hue
+          });
+        }
+      },
+
+      frame: function (env, dt) {
+        var c = env.ctx, w = env.w, h = env.h, t = env.t;
+        var bw = this.buf.width, bh = this.buf.height;
+
+        // 発光体の管理
+        this.nextEmitter -= dt;
+        if (this.nextEmitter <= 0) {
+          this.nextEmitter = 14 + Math.random() * 16;
+          var hues = ["224,164,92", "111,199,194", "200,214,235"];
+          this.emitters.push({
+            x: 0.2 + Math.random() * 0.6, y: 0.2 + Math.random() * 0.6,
+            born: t, life: 22 + Math.random() * 12,
+            hue: hues[(Math.random() * hues.length) | 0]
+          });
+        }
+        for (var e = this.emitters.length - 1; e >= 0; e--) {
+          var em = this.emitters[e];
+          if (t - em.born < em.life) {
+            if (Math.random() < 0.06 && this.parts.length < 900) this.spawn(em);
+          } else this.emitters.splice(e, 1);
+        }
+
+        // 墨の移動（curl 風の流れ）
+        var bc = this.bc;
+        bc.globalCompositeOperation = "source-over";
+        bc.fillStyle = "rgba(4,4,4,0.045)";
+        bc.fillRect(0, 0, bw, bh);
+        bc.globalCompositeOperation = "lighter";
+
+        for (var i = this.parts.length - 1; i >= 0; i--) {
+          var p = this.parts[i];
+          p.age += dt;
+          if (p.age > p.life) { this.parts.splice(i, 1); continue; }
+          var n1 = this.noise.n2(p.x * 6 + t * 0.03, p.y * 6);
+          var n2 = this.noise.n2(p.y * 6 + 40, p.x * 6 - t * 0.02);
+          p.vx += (n2 * 0.00016 - p.vx * 0.02) * dt * 60 * 0.02;
+          p.vy += (n1 * 0.00016 - p.vy * 0.02) * dt * 60 * 0.02;
+          p.x += p.vx * dt * 60;
+          p.y += p.vy * dt * 60;
+
+          var fade = Math.sin(Math.PI * clamp(p.age / p.life, 0, 1));
+          var sz = (0.024 + p.age * 0.0028) * Math.min(bw, bh);
+          var key = p.hue;
+          if (!this.dot[key]) this.dot[key] = softSprite(64, key, 0.9);
+          bc.globalAlpha = 0.10 * fade;
+          bc.drawImage(this.dot[key], p.x * bw - sz, p.y * bh - sz, sz * 2, sz * 2);
+        }
+        bc.globalAlpha = 1;
+
+        // 背景 + 墨を拡大描画
+        c.fillStyle = "#040404";
+        c.fillRect(-20, -20, w + 40, h + 40);
+        c.drawImage(this.buf, -10, -10, w + 20, h + 20);
+
+        // 時刻（墨の向こうに薄く）
+        var ck = env.clock;
+        c.save();
+        c.globalAlpha = 0.10;
+        c.fillStyle = "#e8dcc6";
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.font = "300 " + Math.round(Math.min(w, h) * 0.2) + "px ui-monospace,Consolas,Menlo,monospace";
+        c.fillText(hhmm(ck), w * 0.5, h * 0.5);
+        c.restore();
+      }
+    };
+  }
+
+  /* ============================================================
+     5. 砂 — 砂時計そのものが時計。砂の量が「今」
+     ============================================================ */
+  function sceneSand() {
+    return {
+      id: "sand",
+      name: { ja: "砂", en: "Sand" },
+      desc: { ja: "砂時計。落ちた砂の量が、そのまま今の時刻です。", en: "An hourglass; the sand that has fallen is the time." },
+
+      init: function (env) { fillAll(env, "#0a0806"); this.grains = []; },
+      resize: function (env) { fillAll(env, "#0a0806"); },
+
+      frame: function (env, dt) {
+        var c = env.ctx, w = env.w, h = env.h, ck = env.clock;
+        var g = c.createLinearGradient(0, -20, 0, h + 20);
+        g.addColorStop(0, "#0b0908");
+        g.addColorStop(1, "#060504");
+        c.fillStyle = g;
+        c.fillRect(-20, -20, w + 40, h + 40);
+
+        var cx = w * 0.5, cy = h * 0.5;
+        var hh = Math.min(h * 0.56, w * 0.42);      // 全体の高さ
+        var top = cy - hh * 0.5, bot = cy + hh * 0.5;
+        var halfW = hh * 0.30;                       // 一番広いところ
+        var neck = hh * 0.022;
+
+        var frac = (ck.min + ck.sec / 60) / 60;      // 0..1 今の分
+        var topFill = 1 - frac, botFill = frac;
+
+        // ガラス
+        c.strokeStyle = "rgba(226,214,190,0.20)";
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(cx - halfW, top);
+        c.lineTo(cx - neck, cy);
+        c.lineTo(cx - halfW, bot);
+        c.lineTo(cx + halfW, bot);
+        c.lineTo(cx + neck, cy);
+        c.lineTo(cx + halfW, top);
+        c.closePath();
+        c.stroke();
+
+        // ガラスのハイライト
+        var hl = c.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
+        hl.addColorStop(0, "rgba(255,255,255,0.05)");
+        hl.addColorStop(0.18, "rgba(255,255,255,0.015)");
+        hl.addColorStop(0.8, "rgba(255,255,255,0)");
+        hl.addColorStop(1, "rgba(255,255,255,0.03)");
+        c.fillStyle = hl;
+        c.fillRect(cx - halfW, top, halfW * 2, hh);
+
+        // 砂（上）
+        var sandTop = "rgba(222,184,126,0.95)";
+        c.fillStyle = sandTop;
+        c.beginPath();
+        var yTop = cy - (cy - top) * topFill;
+        c.moveTo(cx - (halfW - neck) * (yTop - top) / (cy - top) - neck, yTop);
+        c.lineTo(cx + (halfW - neck) * (yTop - top) / (cy - top) + neck, yTop);
+        c.lineTo(cx + neck, cy);
+        c.lineTo(cx - neck, cy);
+        c.closePath();
+        c.fill();
+
+        // 砂（下）
+        c.beginPath();
+        var yBot = cy + (bot - cy) * botFill;
+        c.moveTo(cx - (halfW - neck) * (bot - yBot) / (bot - cy) - neck, yBot);
+        c.lineTo(cx + (halfW - neck) * (bot - yBot) / (bot - cy) + neck, yBot);
+        c.lineTo(cx + halfW, bot);
+        c.lineTo(cx - halfW, bot);
+        c.closePath();
+        c.fill();
+
+        // 砂粒の質感
+        var rnd = makeNoise(41);
+        c.fillStyle = "rgba(120,92,54,0.35)";
+        for (var i = 0; i < 160; i++) {
+          var gx = cx + (rnd.rnd() - 0.5) * halfW * 1.6;
+          var gy = cy + (rnd.rnd() - 0.5) * hh * 0.9;
+          c.fillRect(gx, gy, 1, 1);
+        }
+
+        // 落ちる筋
+        c.strokeStyle = "rgba(224,190,136,0.5)";
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(cx, cy - neck);
+        c.lineTo(cx, cy + neck * 2);
+        c.stroke();
+
+        // 時刻（台に刻む）
+        c.fillStyle = "rgba(226,214,190,0.35)";
+        c.textAlign = "center";
+        c.textBaseline = "top";
+        c.font = "400 " + Math.round(Math.min(w, h) * 0.028) + "px ui-monospace,Consolas,Menlo,monospace";
+        c.fillText(hhmm(ck), cx, bot + hh * 0.08);
+      }
+    };
+  }
+
+  /* ============================================================
+     6. 紙 — 活版の時刻。紙の繊維と、にじむインク
+     ============================================================ */
+  function scenePaper() {
+    var DAYS = ["日", "月", "火", "水", "木", "金", "土"];
+    var KAN = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+    var HOURS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"];
+    var MINS = ["", "五", "十", "十五", "二十", "二十五", "三十", "三十五", "四十", "四十五", "五十", "五十五"];
+    function kanjiDay(d) {
+      var t = Math.floor(d / 10), o = d % 10;
+      var tens = t === 0 ? "" : (t === 1 ? "十" : KAN[t] + "十");
+      return tens + (o ? KAN[o] : (t ? "" : KAN[d])) + "日";
+    }
+    function kanjiTime(c) {
+      var h = HOURS[c.h24 % 24] || "零";
+      var m = MINS[Math.floor(c.min / 5)];
+      return h + "時" + (m ? m + "分" : "");
+    }
+    var MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"];
+    return {
+      id: "paper",
+      name: { ja: "紙", en: "Paper" },
+      desc: { ja: "紙に組んだ時刻。インクがゆっくり紙に沈みます。", en: "A time set in paper; the ink slowly sinks in." },
+      _test: { kanjiTime: kanjiTime, kanjiDay: kanjiDay, MONTHS: MONTHS },
+
+      init: function (env) {
+        fillAll(env, "#12100d");
+        this.tex = document.createElement("canvas");
+        var tw = Math.max(2, Math.round(env.w * 0.5)), th = Math.max(2, Math.round(env.h * 0.5));
+        this.tex.width = tw; this.tex.height = th;
+        var x = this.tex.getContext("2d");
+        x.fillStyle = "#12100d";
+        x.fillRect(0, 0, tw, th);
+        var r = makeNoise(63);
+        for (var i = 0; i < 2600; i++) {
+          var px = r.rnd() * tw, py = r.rnd() * th;
+          var len = 4 + r.rnd() * 18;
+          var a = r.rnd() * TAU;
+          x.strokeStyle = "rgba(226,214,190," + (0.012 + r.rnd() * 0.02).toFixed(3) + ")";
+          x.lineWidth = 0.6;
+          x.beginPath(); x.moveTo(px, py); x.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len); x.stroke();
+        }
+      },
+      resize: function (env) { this.init(env); },
+
+      frame: function (env, dt) {
+        var c = env.ctx, w = env.w, h = env.h, ck = env.clock, now = env.now;
+        c.drawImage(this.tex, -10, -10, w + 20, h + 20);
+
+        var cx = w * 0.5, cy = h * 0.5;
+        var big = Math.round(Math.min(w, h) * 0.22);
+        var txt = kanjiTime(ck);
+
         c.textAlign = "center";
         c.textBaseline = "middle";
 
-        var rowH = fs * 1.5;
-        var top = env.h / 2 - ((rows.length - 1) * rowH) / 2;
+        // 罫線
+        c.strokeStyle = "rgba(226,214,190,0.13)";
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(cx - big * 2.1, cy - big * 0.78);
+        c.lineTo(cx + big * 2.1, cy - big * 0.78);
+        c.moveTo(cx - big * 2.1, cy + big * 0.78);
+        c.lineTo(cx + big * 2.1, cy + big * 0.78);
+        c.stroke();
 
-        for (var r = 0; r < rows.length; r++) {
-          var toks = rows[r];
-          var widths = toks.map(function (t) { return c.measureText(t[0]).width; });
-          var gap = fs * 0.55;
-          var total = widths.reduce(function (a, b) { return a + b; }, 0) + gap * (toks.length - 1);
-          var x = env.w / 2 - total / 2;
-          for (var k = 0; k < toks.length; k++) {
-            var key = toks[k][1];
-            var on = active.indexOf(key) >= 0;
-            // 点灯はフェードさせる（瞬間 ON だと明滅になってしまう）
-            var cur = this.fade[key] == null ? (on ? 1 : 0) : this.fade[key];
-            var tgt = on ? 1 : 0;
-            cur += (tgt - cur) * clamp(dt * 2.2, 0, 1);
-            this.fade[key] = cur;
-
-            var w = widths[k];
-            var cx = x + w / 2;
-            var cy = top + r * rowH;
-            // 消字（とても暗く常時表示）＋ 点字
-            c.fillStyle = "rgba(150,170,200," + (0.055 + 0.02 * cur).toFixed(3) + ")";
-            c.fillText(toks[k][0], cx, cy);
-            if (cur > 0.01) {
-              c.fillStyle = "rgba(190,225,255," + (0.9 * cur).toFixed(3) + ")";
-              c.shadowColor = "rgba(110,180,255," + (0.5 * cur).toFixed(3) + ")";
-              c.shadowBlur = fs * 0.5 * cur;
-              c.fillText(toks[k][0], cx, cy);
-              c.shadowBlur = 0;
-            }
-            x += w + gap;
-          }
+        // 活版の時刻（沈み込み + にじみ）
+        var font = "500 " + big + "px 'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP',serif";
+        c.font = font;
+        var tw = c.measureText(txt).width;
+        if (tw > w * 0.78) {
+          big = Math.floor(big * (w * 0.78) / tw);
+          font = "500 " + big + "px 'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP',serif";
+          c.font = font;
         }
+        c.fillStyle = "rgba(0,0,0,0.55)";
+        c.fillText(txt, cx + 1.5, cy + 2.5);
+        c.fillStyle = "rgba(236,228,210,0.95)";
+        c.fillText(txt, cx, cy);
 
-        // 正確な分（5分刻みでは無い部分）を細いプログレスで正直に示す
-        var m = env.now.getMinutes(), s = env.now.getSeconds();
-        var frac = (m * 60 + s) / 3600;
-        var bw = env.w * 0.5, bx = env.w / 2 - bw / 2, by = top + rows.length * rowH - rowH * 0.25;
-        c.fillStyle = "rgba(150,170,200,0.10)";
-        c.fillRect(bx, by, bw, 2);
-        c.fillStyle = "rgba(120,190,255,0.55)";
-        c.fillRect(bx, by, bw * frac, 2);
-      },
-    };
-  }
+        // インクのにじみ（薄い二重写し）
+        c.save();
+        c.globalAlpha = 0.14 + 0.03 * Math.sin(env.t * 0.2);
+        c.filter = "blur(6px)";
+        c.fillStyle = "#e8e0ce";
+        c.fillText(txt, cx + Math.sin(env.t * 0.05) * 0.8, cy + Math.cos(env.t * 0.04) * 0.8);
+        c.restore();
 
-  /* ============================================================
-     3. 粒子時計 — 分が変わるたび、粒子が流れて数字になる
-     ============================================================ */
-  function sceneParticles() {
-    var off = document.createElement("canvas");
-    var octx = off.getContext("2d", { willReadFrequently: true });
+        // 日付
+        var d = now.getDate(), mo = now.getMonth(), dy = now.getDay();
+        c.font = "400 " + Math.round(big * 0.17) + "px 'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP',serif";
+        c.fillStyle = "rgba(226,214,190,0.55)";
+        c.fillText(MONTHS[mo] + kanjiDay(d) + " " + DAYS[dy] + "曜日", cx, cy + big * 0.95);
 
-    function sample(text, w, h, step) {
-      off.width = Math.max(2, Math.floor(w / 2));
-      off.height = Math.max(2, Math.floor(h / 2));
-      octx.clearRect(0, 0, off.width, off.height);
-      octx.fillStyle = "#fff";
-      octx.textAlign = "center";
-      octx.textBaseline = "middle";
-      var fs = Math.min(off.width / (text.length * 0.72), off.height * 0.52);
-      octx.font = "700 " + fs.toFixed(1) + 'px ui-monospace,"Consolas","Menlo",monospace';
-      octx.fillText(text, off.width / 2, off.height / 2);
-      var img = octx.getImageData(0, 0, off.width, off.height).data;
-      var pts = [];
-      for (var y = 0; y < off.height; y += step) {
-        for (var x = 0; x < off.width; x += step) {
-          if (img[(y * off.width + x) * 4 + 3] > 140) {
-            pts.push([x * 2, y * 2]);
-          }
-        }
+        // 分の進み（下辺の細い線）
+        var frac = (ck.min * 60 + ck.sec) / 3600;
+        c.strokeStyle = "rgba(226,214,190,0.22)";
+        c.beginPath();
+        c.moveTo(cx - big * 2.1, h * 0.86);
+        c.lineTo(cx - big * 2.1 + big * 4.2 * frac, h * 0.86);
+        c.stroke();
       }
-      return pts;
-    }
-
-    return {
-      id: "particles",
-      name: { ja: "粒子時計", en: "Particle Clock" },
-      desc: { ja: "分が変わるたび、粒子が流れて時刻の数字を組み直します。", en: "Every minute the particles reflow into the new time." },
-
-      init: function (env) {
-        this.n = env.w < 700 ? 900 : 1600;
-        this.parts = [];
-        this.targets = [];
-        this.key = "";
-        this.t = 0;
-      },
-      resize: function (env) { this.key = ""; },
-
-      frame: function (env, dt) {
-        var c = env.ctx;
-        c.globalCompositeOperation = "source-over";
-        fillAll(env, "rgba(8,10,17,0.20)");
-
-        var hh = String(env.clock.h24).padStart(2, "0");
-        var mm = String(env.clock.min).padStart(2, "0");
-        var key = hh + ":" + mm;
-
-        if (key !== this.key) {
-          this.key = key;
-          var pts = sample(key, env.w, env.h, env.w < 700 ? 9 : 7);
-          if (!pts.length) return;
-          // 粒子数に合わせてターゲットを複製／間引き
-          var t = [];
-          for (var i = 0; i < this.n; i++) t.push(pts[(Math.random() * pts.length) | 0]);
-          this.targets = t;
-          // 最初の一度だけ、画面外から流し込む
-          if (!this.parts.length) {
-            for (var j = 0; j < this.n; j++) {
-              this.parts.push({
-                x: Math.random() * env.w, y: Math.random() * env.h,
-                vx: 0, vy: 0,
-              });
-            }
-          }
-        }
-        if (!this.targets.length) return;
-
-        c.globalCompositeOperation = "lighter";
-        for (var p = 0; p < this.parts.length; p++) {
-          var pt = this.parts[p];
-          var tg = this.targets[p];
-          // ターゲットへの緩やかな収束＋ゆらぎ（収束しきらないことで生き続ける）
-          var dx = tg[0] - pt.x, dy = tg[1] - pt.y;
-          pt.vx += dx * 0.0060 * (dt * 60) + (Math.random() - 0.5) * 0.16;
-          pt.vy += dy * 0.0060 * (dt * 60) + (Math.random() - 0.5) * 0.16;
-          pt.vx *= 0.90; pt.vy *= 0.90;
-          pt.x += pt.vx; pt.y += pt.vy;
-
-          var sp = Math.min(1, Math.sqrt(pt.vx * pt.vx + pt.vy * pt.vy) / 6);
-          // 速い間は青白く、収束すると落ち着いた青へ
-          var rr = Math.round(lerp(90, 150, sp));
-          var gg = Math.round(lerp(150, 210, sp));
-          var bb = 255;
-          c.fillStyle = "rgba(" + rr + "," + gg + "," + bb + "," + (0.16 + 0.30 * sp).toFixed(3) + ")";
-          c.fillRect(pt.x, pt.y, 2, 2);
-        }
-        c.globalCompositeOperation = "source-over";
-      },
     };
   }
 
-  /* ============================================================
-     4. 流れ場 — ノイズの場を粒子が流れ続ける
-     ============================================================ */
-  function sceneFlow() {
-    return {
-      id: "flow",
-      name: { ja: "流れ場", en: "Flow Field" },
-      desc: { ja: "ゆっくり形を変えるノイズの場を、粒子が流れ続けます。", en: "Particles drifting through a slowly morphing noise field." },
-
-      init: function (env) {
-        this.nz = makeNoise(20260921);
-        this.n = env.w < 700 ? 700 : 1300;
-        this.p = [];
-        for (var i = 0; i < this.n; i++) {
-          this.p.push({
-            x: Math.random() * env.w, y: Math.random() * env.h,
-            a: Math.random(), life: Math.random() * 6,
-          });
-        }
-        fillAll(env, "#070a11");
-      },
-      resize: function (env) { fillAll(env, "#070a11"); },
-
-      frame: function (env, dt) {
-        var c = env.ctx;
-        fillAll(env, "rgba(7,10,17,0.035)");
-        c.globalCompositeOperation = "lighter";
-        c.lineCap = "round";
-
-        var t = env.t;
-        var scale = 0.0016;
-        for (var i = 0; i < this.p.length; i++) {
-          var q = this.p[i];
-          var ang = this.nz.n2(q.x * scale, q.y * scale + t * 0.035) * TAU * 1.6
-                  + this.nz.n2(q.y * scale * 0.5 - t * 0.02, q.x * scale * 0.5) * 1.2;
-          var sp = 26 + q.a * 34;
-          var px = q.x, py = q.y;
-          q.x += Math.cos(ang) * sp * dt;
-          q.y += Math.sin(ang) * sp * dt;
-          q.life -= dt;
-
-          // 寿命が来たら、場の中で別の場所に生まれ直す（端から消えない）
-          if (q.life <= 0 || q.x < -20 || q.x > env.w + 20 || q.y < -20 || q.y > env.h + 20) {
-            q.x = Math.random() * env.w;
-            q.y = Math.random() * env.h;
-            q.life = 3 + Math.random() * 6;
-            continue;
-          }
-          var hue = 200 + q.a * 45;
-          c.strokeStyle = "hsla(" + hue.toFixed(0) + ",80%,66%,0.16)";
-          c.lineWidth = 0.6 + q.a * 1.1;
-          c.beginPath();
-          c.moveTo(px, py);
-          c.lineTo(q.x, q.y);
-          c.stroke();
-        }
-        c.globalCompositeOperation = "source-over";
-      },
-    };
-  }
-
-  /* ============================================================
-     5. 波干渉 — 複数の波源のうねりが交わる
-     ============================================================ */
-  function sceneWaves() {
-    var SCALE = 6; // 低解像度で計算して拡大（1px あたり複数回の sin を避ける）
-    return {
-      id: "waves",
-      name: { ja: "波干渉", en: "Interference" },
-      desc: { ja: "いくつもの波源から届くうねりが、ゆっくり干渉し合います。", en: "Slow swells from several sources interfering." },
-
-      init: function (env) {
-        this.buf = document.createElement("canvas");
-        this.reset(env);
-      },
-      resize: function (env) { this.reset(env); },
-      reset: function (env) {
-        this.bw = Math.max(24, Math.ceil(env.w / SCALE));
-        this.bh = Math.max(16, Math.ceil(env.h / SCALE));
-        this.buf.width = this.bw;
-        this.buf.height = this.bh;
-        this.bctx = this.buf.getContext("2d");
-        this.img = this.bctx.createImageData(this.bw, this.bh);
-      },
-
-      frame: function (env, dt) {
-        var t = env.t;
-        var src = [
-          { x: 0.28 + 0.10 * fsin(t * 0.071), y: 0.34 + 0.12 * fsin(t * 0.053 + 1.3), k: 26, w: 0.62 },
-          { x: 0.72 + 0.11 * fsin(t * 0.047 + 2.1), y: 0.62 + 0.10 * fsin(t * 0.061 + 0.4), k: 22, w: 0.58 },
-          { x: 0.50 + 0.16 * fsin(t * 0.037 + 4.0), y: 0.20 + 0.14 * fsin(t * 0.043 + 2.6), k: 30, w: 0.44 },
-          { x: 0.44 + 0.13 * fsin(t * 0.029 + 5.2), y: 0.80 + 0.11 * fsin(t * 0.033 + 3.1), k: 18, w: 0.40 },
-        ];
-        var d = this.img.data;
-        var bw = this.bw, bh = this.bh;
-        var inv = 1 / Math.max(1e-6, Math.sqrt(bw * bw + bh * bh));
-        var p = 0;
-        for (var y = 0; y < bh; y++) {
-          for (var x = 0; x < bw; x++) {
-            var v = 0;
-            for (var s = 0; s < 4; s++) {
-              var o = src[s];
-              var dx = x / bw - o.x, dy = y / bh - o.y;
-              var r = Math.sqrt(dx * dx + dy * dy);
-              v += fsin(r * o.k - t * o.w) * o.w;
-            }
-            // -1..1 → 暗い藍の階調（まぶしさを抑えるため最大輝度を絞る）
-            var n = clamp(v * 0.62, -1, 1);
-            var g = n * 0.5 + 0.5;
-            d[p] = 8 + g * 34;
-            d[p + 1] = 12 + g * 74;
-            d[p + 2] = 22 + g * 128;
-            d[p + 3] = 255;
-            p += 4;
-          }
-        }
-        this.bctx.putImageData(this.img, 0, 0);
-        var c = env.ctx;
-        c.imageSmoothingEnabled = true;
-        c.globalCompositeOperation = "source-over";
-        c.drawImage(this.buf, 0, 0, env.w, env.h);
-      },
-    };
-  }
-
-  /* ============================================================
-     6. 星屑 — ゆっくり流れる星と、ときどきの流星
-     ============================================================ */
-  function sceneStars() {
-    return {
-      id: "stars",
-      name: { ja: "星屑", en: "Stardust" },
-      desc: { ja: "ゆっくり流れる星屑。ときどき、流星が筋を引きます。", en: "Slow-drifting stardust, with the occasional meteor." },
-
-      init: function (env) {
-        this.nz = makeNoise(777);
-        this.n = env.w < 700 ? 260 : 460;
-        this.st = [];
-        for (var i = 0; i < this.n; i++) this.st.push(this.mk(env, true));
-        this.shoot = null;
-        this.next = 6 + Math.random() * 18;
-      },
-      mk: function (env, spread) {
-        var z = Math.random();
-        return {
-          x: Math.random() * env.w,
-          y: spread ? Math.random() * env.h : -8,
-          z: z,
-          ph: Math.random() * TAU,
-          tw: 0.5 + Math.random() * 1.6,
-        };
-      },
-      resize: function () {},
-
-      frame: function (env, dt) {
-        var c = env.ctx;
-        fillAll(env, "#05070d");
-
-        // うっすらと天の川のような帯
-        var g = c.createLinearGradient(0, env.h * 0.15, env.w, env.h * 0.85);
-        g.addColorStop(0, "rgba(70,95,150,0)");
-        g.addColorStop(0.45, "rgba(80,105,160,0.055)");
-        g.addColorStop(0.6, "rgba(95,120,175,0.075)");
-        g.addColorStop(1, "rgba(70,95,150,0)");
-        c.fillStyle = g;
-        fillAll(env, g);
-
-        c.globalCompositeOperation = "lighter";
-        for (var i = 0; i < this.st.length; i++) {
-          var s = this.st[i];
-          // 奥行きが速さに効く（遠い星はゆっくり）
-          s.x -= (4 + s.z * 16) * dt;
-          s.y += (1.5 + s.z * 5) * dt;
-          if (s.x < -10) { s.x = env.w + 8; s.y = Math.random() * env.h; }
-          if (s.y > env.h + 10) { s.y = -8; s.x = Math.random() * env.w; }
-
-          var tw = 0.55 + 0.45 * fsin(env.t * s.tw + s.ph);
-          var a = (0.10 + s.z * 0.55) * tw;
-          var r = 0.5 + s.z * 1.5;
-          c.fillStyle = "rgba(210,228,255," + a.toFixed(3) + ")";
-          c.beginPath();
-          c.arc(s.x, s.y, r, 0, TAU);
-          c.fill();
-          if (s.z > 0.82) {
-            var gg = c.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 5);
-            gg.addColorStop(0, "rgba(180,210,255," + (a * 0.5).toFixed(3) + ")");
-            gg.addColorStop(1, "rgba(180,210,255,0)");
-            c.fillStyle = gg;
-            c.beginPath();
-            c.arc(s.x, s.y, r * 5, 0, TAU);
-            c.fill();
-          }
-        }
-
-        // 流星
-        this.next -= dt;
-        if (!this.shoot && this.next <= 0) {
-          this.shoot = {
-            x: env.w * (0.15 + Math.random() * 0.7),
-            y: env.h * (0.05 + Math.random() * 0.35),
-            vx: -(260 + Math.random() * 220),
-            vy: 150 + Math.random() * 130,
-            life: 0,
-            max: 0.9 + Math.random() * 0.5,
-          };
-          this.next = 14 + Math.random() * 34;
-        }
-        if (this.shoot) {
-          var m = this.shoot;
-          m.life += dt;
-          m.x += m.vx * dt; m.y += m.vy * dt;
-          var f = 1 - m.life / m.max;
-          if (f <= 0) { this.shoot = null; }
-          else {
-            var len = 130 * f;
-            var nx = m.vx, ny = m.vy;
-            var mag = Math.sqrt(nx * nx + ny * ny) || 1;
-            var lg = c.createLinearGradient(m.x, m.y, m.x - (nx / mag) * len, m.y - (ny / mag) * len);
-            lg.addColorStop(0, "rgba(225,240,255," + (0.75 * f).toFixed(3) + ")");
-            lg.addColorStop(1, "rgba(225,240,255,0)");
-            c.strokeStyle = lg;
-            c.lineWidth = 1.6;
-            c.beginPath();
-            c.moveTo(m.x, m.y);
-            c.lineTo(m.x - (nx / mag) * len, m.y - (ny / mag) * len);
-            c.stroke();
-          }
-        }
-        c.globalCompositeOperation = "source-over";
-      },
-    };
-  }
-
-  global.SCENES = [
-    sceneTrail(), sceneWord(), sceneParticles(),
-    sceneFlow(), sceneWaves(), sceneStars(),
-  ];
+  global.SCENES = [sceneMoon(), sceneRain(), sceneDeep(), sceneInk(), sceneSand(), scenePaper()];
 })(typeof window !== "undefined" ? window : this);
