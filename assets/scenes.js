@@ -810,8 +810,8 @@
         c.fillStyle = sandTop;
         c.beginPath();
         var yTop = cy - (cy - top) * topFill;
-        c.moveTo(cx - (halfW - neck) * (yTop - top) / (cy - top) - neck, yTop);
-        c.lineTo(cx + (halfW - neck) * (yTop - top) / (cy - top) + neck, yTop);
+        c.moveTo(cx - (halfW - neck) * (cy - yTop) / (cy - top) - neck, yTop);
+        c.lineTo(cx + (halfW - neck) * (cy - yTop) / (cy - top) + neck, yTop);
         c.lineTo(cx + neck, cy);
         c.lineTo(cx - neck, cy);
         c.closePath();
