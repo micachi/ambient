@@ -95,6 +95,11 @@ a:hover{text-decoration:underline}
   box-shadow:0 -18px 50px rgba(0,0,0,.45);
 }
 .panel.open{transform:translate(-50%,0)}
+.pclose{
+  position:absolute;top:12px;right:14px;width:30px;height:30px;padding:0;
+  display:grid;place-items:center;font-size:1.05rem;line-height:1;border-radius:999px;
+}
+.panel{padding-right:52px}
 .prow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .plabel{font-size:.8rem;color:var(--mut);min-width:86px}
 .inline{font-size:.78rem;color:var(--mut)}

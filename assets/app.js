@@ -236,7 +236,23 @@
 
     // キー操作
     document.addEventListener("keydown", function (e) {
-      if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+      var panel = document.getElementById("panel");
+      var panelOpen = !!(panel && panel.classList.contains("open"));
+      var typing = e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+
+      // Escape はパネルを閉じる（入力中でも効かせる）
+      if (e.key === "Escape" || e.key === "Esc") {
+        if (panelOpen) { self.closePanel(); e.preventDefault(); }
+        return;
+      }
+      // S はパネルの開閉。入力にフォーカスが残っていても効かせる
+      // （range/select を触ったあと S が効かず閉じられなくなるバグの修正）
+      if (e.key === "s" || e.key === "S") {
+        self.togglePanel();
+        e.preventDefault();
+        return;
+      }
+      if (typing) return;
       var i = self.indexOf(self.s.scene);
       switch (e.key) {
         case "ArrowRight": case "d": self.switchTo(self.scenes[(i + 1) % self.scenes.length].id); break;
@@ -251,6 +267,14 @@
       }
       self.nudgeUI();
     });
+
+    // パネルの外をクリックしたら閉じる（capture で先に判定）
+    document.addEventListener("click", function (e) {
+      var panel = document.getElementById("panel");
+      if (!panel || !panel.classList.contains("open")) return;
+      if (panel.contains(e.target)) return;
+      self.closePanel();
+    }, true);
 
     // 操作があったこと自体で UI を出す
     ["mousemove", "touchstart", "click"].forEach(function (ev) {
@@ -276,7 +300,21 @@
     var p = document.getElementById("panel");
     if (!p) return;
     p.classList.toggle("open");
+    if (!p.classList.contains("open")) this.blurActive();
     this.nudgeUI();
+  };
+
+  App.prototype.closePanel = function () {
+    var p = document.getElementById("panel");
+    if (!p) return;
+    p.classList.remove("open");
+    this.blurActive();
+    this.nudgeUI();
+  };
+
+  App.prototype.blurActive = function () {
+    var a = document.activeElement;
+    if (a && a !== document.body && typeof a.blur === "function") a.blur();
   };
 
   App.prototype.setBrightness = function (v) {
@@ -399,6 +437,9 @@
 
     var fsb = document.getElementById("fsBtn");
     if (fsb) fsb.addEventListener("click", function () { self.fullscreen(); });
+
+    var pcl = document.getElementById("pclose");
+    if (pcl) pcl.addEventListener("click", function (e) { e.stopPropagation(); self.closePanel(); });
 
     this.applyBrightness();
 

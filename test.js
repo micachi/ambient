@@ -206,6 +206,37 @@ const btns = [...d.querySelectorAll("[data-scene]")];
 ok("設定パネルにシーンボタンが 6 個", btns.length === 6, String(btns.length));
 ok("現在のシーンがボタンで選択状態", btns.some((b) => b.classList.contains("on") && b.getAttribute("data-scene") === "deep"));
 
+/* ---------- 7b. 設定パネルを閉じる経路 ---------- */
+console.log("\n--- 7b. パネルを閉じる ---");
+const panelEl = d.getElementById("panel");
+const brEl = d.getElementById("br");
+const keyOn = (el, key) => (el || d.body).dispatchEvent(new w.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+
+panelEl.classList.add("open");
+if (brEl && brEl.focus) brEl.focus();
+keyOn(brEl, "s");
+ok("パネル: 入力にフォーカスが残っても S で閉じる", !panelEl.classList.contains("open"));
+
+panelEl.classList.add("open");
+keyOn(brEl, "Escape");
+ok("パネル: Escape で閉じる", !panelEl.classList.contains("open"));
+
+panelEl.classList.add("open");
+const pcloseEl = d.getElementById("pclose");
+ok("パネル: 閉じるボタンがある", !!pcloseEl);
+if (pcloseEl) pcloseEl.click();
+ok("パネル: 閉じるボタンで閉じる", !panelEl.classList.contains("open"));
+
+panelEl.classList.add("open");
+d.getElementById("cv").dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+ok("パネル: 外側クリックで閉じる", !panelEl.classList.contains("open"));
+
+panelEl.classList.add("open");
+brEl.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+ok("パネル: 内側クリックでは閉じない", panelEl.classList.contains("open"));
+app.closePanel();
+ok("パネル: closePanel() で閉じる", !panelEl.classList.contains("open"));
+
 /* ---------- 8. ロケール / 相互リンク ---------- */
 console.log("\n--- 8. ロケールと相互リンク ---");
 const jaHtml = fs.readFileSync(path.join(DIST, "index.html"), "utf8");

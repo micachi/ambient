@@ -27,6 +27,7 @@ const T = {
     tagline: "ずっと眺めていられる、ブラウザのスクリーンセーバー",
     hintKeys: "← → シーン切替 ／ F 全画面 ／ S 設定 ／ H UI 非表示 ／ + − 明るさ",
     settings: "設定",
+    close: "閉じる",
     sceneList: "シーン",
     cycle: "自動で次のシーンへ",
     cycleEvery: "間隔",
@@ -49,6 +50,7 @@ const T = {
     tagline: "A browser screensaver you can watch forever",
     hintKeys: "← → switch scene / F fullscreen / S settings / H hide UI / + - brightness",
     settings: "Settings",
+    close: "Close",
     sceneList: "Scenes",
     cycle: "Advance automatically",
     cycleEvery: "Interval",
@@ -104,6 +106,7 @@ function page(t) {
   </footer>
 
   <section id="panel" class="panel" aria-label="${t.settings}">
+    <button type="button" id="pclose" class="ghost pclose" aria-label="${t.close}" title="${t.close}">&times;</button>
     <div class="prow">
       <div class="plabel">${t.sceneList}</div>
       <div id="sceneBtns" class="scenebtns"></div>
