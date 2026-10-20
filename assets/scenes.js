@@ -754,11 +754,23 @@
   /* ============================================================
      5. 砂 — 砂時計そのものが時計。砂の量が「今」
      ============================================================ */
+  /* 砂時計の面の位置を体積から逆算する。
+     体積は等速で移るが、断面積が高さで変わるので面の速さは等速ではない。
+     topS: 首から上へ 0..1 / botU: 底から首へ 0..1（形が同じなので topS + botU = 1） */
+  function sandLevels(frac, halfW, neck) {
+    var HW = halfW, NK = neck, dW = Math.max(1e-6, HW - NK);
+    var f = clamp(frac, 0, 1);
+    var topS = (-NK + Math.sqrt(NK * NK + dW * (1 - f) * (HW + NK))) / dW;
+    var botU = (HW - Math.sqrt(Math.max(0, HW * HW - (HW * HW - NK * NK) * f))) / dW;
+    return { topS: clamp(topS, 0, 1), botU: clamp(botU, 0, 1) };
+  }
+
   function sceneSand() {
     return {
       id: "sand",
       name: { ja: "砂", en: "Sand" },
       desc: { ja: "砂時計。落ちた砂の量が、そのまま今の時刻です。", en: "An hourglass; the sand that has fallen is the time." },
+      _test: { levels: sandLevels },
 
       init: function (env) { fillAll(env, "#0a0806"); this.grains = []; },
       resize: function (env) { fillAll(env, "#0a0806"); },
@@ -779,8 +791,11 @@
         var halfW = hh * 0.30;                       // 一番広いところ
         var neck = hh * 0.022;
 
-        var frac = (ck.min + ck.sec / 60) / 60;      // 0..1 今の分
-        var topFill = 1 - frac, botFill = frac;
+        var frac = (ck.min + ck.sec / 60) / 60;      // 0..1 今の分（体積は等速で減る）
+        var lv = sandLevels(frac, halfW, neck);
+        var topLeft = 1 - frac;                      // 上の砂の残量（筋のフェード用）
+        var yTop = cy - (cy - top) * lv.topS;
+        var yBot = bot - (bot - cy) * lv.botU;
 
         // ガラス
         c.strokeStyle = css(lerpRgb(hexRgb("#e2d6be"), hexRgb("#ffcf9c"), wm * 0.6), (0.14 + 0.10 * lit).toFixed(3));
@@ -809,7 +824,6 @@
         var sandTop = css(sandCol, 0.95);
         c.fillStyle = sandTop;
         c.beginPath();
-        var yTop = cy - (cy - top) * topFill;
         c.moveTo(cx - (halfW - neck) * (cy - yTop) / (cy - top) - neck, yTop);
         c.lineTo(cx + (halfW - neck) * (cy - yTop) / (cy - top) + neck, yTop);
         c.lineTo(cx + neck, cy);
@@ -819,7 +833,6 @@
 
         // 砂（下）
         c.beginPath();
-        var yBot = bot - (bot - cy) * botFill;
         c.moveTo(cx - (halfW - neck) * (yBot - cy) / (bot - cy) - neck, yBot);
         c.lineTo(cx + (halfW - neck) * (yBot - cy) / (bot - cy) + neck, yBot);
         c.lineTo(cx + halfW, bot);
@@ -837,7 +850,7 @@
         }
 
         // 落ちる筋（上の砂が尽きたら消える）
-        c.strokeStyle = css(sandCol, (0.5 * Math.min(1, topFill * 4)).toFixed(3));
+        c.strokeStyle = css(sandCol, (0.5 * Math.min(1, topLeft * 4)).toFixed(3));
         c.lineWidth = 1;
         c.beginPath();
         c.moveTo(cx, cy - neck);

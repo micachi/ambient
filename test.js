@@ -127,6 +127,36 @@ ok("雨: 明るさは 0..1.2 に収まる", (() => {
   return true;
 })());
 
+// 砂: 体積は等速、面の速度は断面積で変わる
+const sandScene = SCENES.find((s) => s.id === "sand");
+const LV = sandScene._test.levels;
+const HWt = 100.8, NKt = 7.4;
+const volTop = (s) => (NKt * s + (HWt - NKt) * s * s / 2) / (NKt + (HWt - NKt) / 2);
+const volBot = (t) => (2 * HWt * t - (HWt - NKt) * t * t) / (HWt + NKt);
+ok("砂: 始まりは上いっぱい・下が空", LV(0, HWt, NKt).topS === 1 && LV(0, HWt, NKt).botU === 0,
+  JSON.stringify(LV(0, HWt, NKt)));
+ok("砂: 終わりは上が空・下いっぱい", LV(1, HWt, NKt).topS === 0 && Math.abs(LV(1, HWt, NKt).botU - 1) < 1e-9,
+  JSON.stringify(LV(1, HWt, NKt)));
+ok("砂: 上の残量が体積で等速（1-frac に一致）", (() => {
+  for (let f = 0; f <= 1.0001; f += 0.05) {
+    const lv = LV(f, HWt, NKt);
+    if (Math.abs(volTop(lv.topS) - (1 - f)) > 0.01) return false;
+  }
+  return true;
+})());
+ok("砂: 下の堆積も体積で等速（frac に一致）", (() => {
+  for (let f = 0; f <= 1.0001; f += 0.05) {
+    const lv = LV(f, HWt, NKt);
+    if (Math.abs(volBot(lv.botU) - f) > 0.01) return false;
+  }
+  return true;
+})());
+ok("砂: 面は等速で動かない（首に近づくと速い）", (() => {
+  const a = LV(0.10, HWt, NKt).topS - LV(0.20, HWt, NKt).topS;  // 序盤の低下量
+  const b = LV(0.80, HWt, NKt).topS - LV(0.90, HWt, NKt).topS;  // 終盤の低下量
+  return b > a * 1.5;
+})());
+
 /* ---------- 4. ドリフト（焼き付き防止） ---------- */
 console.log("\n--- 4. 焼き付き防止ドリフト ---");
 const driftAt = w.AMBIENT.driftAt;
