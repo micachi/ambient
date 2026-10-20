@@ -75,7 +75,7 @@ const paper = SCENES.find((s) => s.id === "paper");
 const PT = paper && paper._test;
 ok("紙: テスト用マッピングを公開している", !!PT);
 
-const TIME_RE = /^(零|一|二|三|四|五|六|七|八|九|十|十一|十二)時((五|十|十五|二十|二十五|三十|三十五|四十|四十五|五十|五十五)分)?$/;
+const TIME_RE = /^(零|一|二|三|四|五|六|七|八|九|十|十一|十二|十三|十四|十五|十六|十七|十八|十九|二十|二十一|二十二|二十三)時((五|十|十五|二十|二十五|三十|三十五|四十|四十五|五十|五十五)分)?$/;
 const badTime = [];
 for (let h = 0; h < 24; h++) {
   for (let m = 0; m < 60; m++) {
@@ -88,6 +88,9 @@ ok("紙: 0 分は「時」で終わる（分を付けない）", PT.kanjiTime({ 
   PT.kanjiTime({ h24: 8, min: 0 }));
 ok("紙: 45 分は「四十五分」", PT.kanjiTime({ h24: 8, min: 45 }) === "八時四十五分",
   PT.kanjiTime({ h24: 8, min: 45 }));
+ok("紙: 13 時以降も漢数字（18時・23時）",
+  PT.kanjiTime({ h24: 18, min: 0 }) === "十八時" && PT.kanjiTime({ h24: 23, min: 30 }) === "二十三時三十分",
+  PT.kanjiTime({ h24: 18, min: 0 }) + " / " + PT.kanjiTime({ h24: 23, min: 30 }));
 ok("紙: 日付は漢数字（1・10・20・31 日）",
   PT.kanjiDay(1) === "一日" && PT.kanjiDay(10) === "十日" &&
   PT.kanjiDay(20) === "二十日" && PT.kanjiDay(31) === "三十一日",

@@ -554,19 +554,22 @@
 
       frame: function (env, dt) {
         var c = env.ctx, w = env.w, h = env.h, t = env.t;
+        var st = skyState(env.clock);
+        var lit = clamp(st.light, 0, 1), wm = st.warm;
 
         var g = c.createLinearGradient(0, -20, 0, h + 20);
-        g.addColorStop(0, "#0a2b3d");
-        g.addColorStop(0.35, "#02101a");
-        g.addColorStop(1, "#000409");
+        g.addColorStop(0, css(skyShade("#0a2b3d", "#1d6b8c", "#2f88aa", lit, wm * 0.5)));
+        g.addColorStop(0.35, css(skyShade("#02101a", "#0a2b38", "#12455c", lit, wm * 0.5)));
+        g.addColorStop(1, css(skyShade("#000409", "#020c14", "#03141f", lit, wm * 0.5)));
         c.fillStyle = g;
         c.fillRect(-20, -20, w + 40, h + 40);
 
-        // 水面の明るみ
+        // 水面の明るみ（時刻で強さと色が変わる）
         c.globalCompositeOperation = "lighter";
+        var sgCol = lerpRgb(hexRgb("#96d7f5"), hexRgb("#ffcf9c"), wm * 0.75);
         var sg = c.createRadialGradient(w * 0.34, -h * 0.1, 0, w * 0.34, -h * 0.1, Math.min(w, h) * 0.85);
-        sg.addColorStop(0, "rgba(150,215,245,0.12)");
-        sg.addColorStop(1, "rgba(150,215,245,0)");
+        sg.addColorStop(0, css(sgCol, (0.05 + 0.10 * lit).toFixed(3)));
+        sg.addColorStop(1, css(sgCol, 0));
         c.fillStyle = sg;
         c.fillRect(-20, -20, w + 40, h + 40);
 
@@ -577,10 +580,12 @@
           var x0 = (s.x + sway) * w;
           var wd = s.w * w;
           var lg = c.createLinearGradient(0, 0, 0, h);
-          var a = s.a * (0.75 + 0.25 * Math.sin(t * 0.09 + s.ph));
-          lg.addColorStop(0, "rgba(185,235,255," + (a * 1.35).toFixed(3) + ")");
-          lg.addColorStop(0.55, "rgba(130,200,235," + (a * 0.32).toFixed(3) + ")");
-          lg.addColorStop(1, "rgba(120,190,230,0)");
+          var a = s.a * (0.75 + 0.25 * Math.sin(t * 0.09 + s.ph)) * (0.45 + 0.55 * lit);
+          var sc0 = lerpRgb(hexRgb("#b9ebff"), hexRgb("#ffd9b0"), wm * 0.8);
+          var sc1 = lerpRgb(hexRgb("#82c8eb"), hexRgb("#f0b070"), wm * 0.8);
+          lg.addColorStop(0, css(sc0, (a * 1.35).toFixed(3)));
+          lg.addColorStop(0.55, css(sc1, (a * 0.32).toFixed(3)));
+          lg.addColorStop(1, css(sc1, 0));
           c.fillStyle = lg;
           c.beginPath();
           c.moveTo(x0, -10);
@@ -591,7 +596,7 @@
           c.fill();
           // 柱の芯（細い高輝度）
           var coreA = a * 1.6;
-          c.strokeStyle = "rgba(215,245,255," + Math.min(0.5, coreA).toFixed(3) + ")";
+          c.strokeStyle = css(lerpRgb(hexRgb("#d7f5ff"), hexRgb("#ffe0c0"), wm * 0.8), Math.min(0.5, coreA).toFixed(3));
           c.lineWidth = 1.2;
           c.beginPath();
           c.moveTo(x0 + wd * 0.5, -10);
@@ -674,6 +679,8 @@
       frame: function (env, dt) {
         var c = env.ctx, w = env.w, h = env.h, t = env.t;
         var bw = this.buf.width, bh = this.buf.height;
+        var st = skyState(env.clock);
+        var lit = clamp(st.light, 0, 1), wm = st.warm;
 
         // 発光体の管理
         this.nextEmitter -= dt;
@@ -715,7 +722,7 @@
           var sz = (0.024 + p.age * 0.0028) * Math.min(bw, bh);
           var key = p.hue;
           if (!this.dot[key]) this.dot[key] = softSprite(64, key, 0.9);
-          bc.globalAlpha = 0.10 * fade;
+          bc.globalAlpha = 0.10 * fade * (0.85 + 0.30 * lit);
           bc.drawImage(this.dot[key], p.x * bw - sz, p.y * bh - sz, sz * 2, sz * 2);
         }
         bc.globalAlpha = 1;
@@ -724,6 +731,11 @@
         c.fillStyle = "#040404";
         c.fillRect(-20, -20, w + 40, h + 40);
         c.drawImage(this.buf, -10, -10, w + 20, h + 20);
+
+        // 水の明るさ（時刻で色が変わる）
+        var wash = lerpRgb(lerpRgb(hexRgb("#0a1116"), hexRgb("#dfe7ec"), lit), hexRgb("#e0915a"), wm * 0.7);
+        c.fillStyle = css(wash, (0.06 + 0.10 * lit + 0.05 * wm).toFixed(3));
+        c.fillRect(-20, -20, w + 40, h + 40);
 
         // 時刻（墨の向こうに薄く）
         var ck = env.clock;
@@ -753,9 +765,11 @@
 
       frame: function (env, dt) {
         var c = env.ctx, w = env.w, h = env.h, ck = env.clock;
+        var st = skyState(ck);
+        var lit = clamp(st.light, 0, 1), wm = st.warm;
         var g = c.createLinearGradient(0, -20, 0, h + 20);
-        g.addColorStop(0, "#0b0908");
-        g.addColorStop(1, "#060504");
+        g.addColorStop(0, css(skyShade("#0b0908", "#221d17", "#302821", lit, wm * 0.5)));
+        g.addColorStop(1, css(skyShade("#060504", "#120f0b", "#1a1611", lit, wm * 0.5)));
         c.fillStyle = g;
         c.fillRect(-20, -20, w + 40, h + 40);
 
@@ -769,7 +783,7 @@
         var topFill = 1 - frac, botFill = frac;
 
         // ガラス
-        c.strokeStyle = "rgba(226,214,190,0.20)";
+        c.strokeStyle = css(lerpRgb(hexRgb("#e2d6be"), hexRgb("#ffcf9c"), wm * 0.6), (0.14 + 0.10 * lit).toFixed(3));
         c.lineWidth = 1;
         c.beginPath();
         c.moveTo(cx - halfW, top);
@@ -791,7 +805,8 @@
         c.fillRect(cx - halfW, top, halfW * 2, hh);
 
         // 砂（上）
-        var sandTop = "rgba(222,184,126,0.95)";
+        var sandCol = lerpRgb(lerpRgb(hexRgb("#deb87e"), hexRgb("#e8c98f"), lit), hexRgb("#e0a066"), wm * 0.55);
+        var sandTop = css(sandCol, 0.95);
         c.fillStyle = sandTop;
         c.beginPath();
         var yTop = cy - (cy - top) * topFill;
@@ -830,7 +845,7 @@
         c.stroke();
 
         // 時刻（台に刻む）
-        c.fillStyle = "rgba(226,214,190,0.35)";
+        c.fillStyle = css(lerpRgb(hexRgb("#e2d6be"), hexRgb("#ffcf9c"), wm * 0.5), (0.30 + 0.12 * lit).toFixed(3));
         c.textAlign = "center";
         c.textBaseline = "top";
         c.font = "400 " + Math.round(Math.min(w, h) * 0.028) + "px ui-monospace,Consolas,Menlo,monospace";
@@ -845,15 +860,20 @@
   function scenePaper() {
     var DAYS = ["日", "月", "火", "水", "木", "金", "土"];
     var KAN = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
-    var HOURS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"];
     var MINS = ["", "五", "十", "十五", "二十", "二十五", "三十", "三十五", "四十", "四十五", "五十", "五十五"];
+    function kanjiHour(h) {
+      h = ((h % 24) + 24) % 24;
+      if (h < 10) return KAN[h] || "零";
+      var t = Math.floor(h / 10), o = h % 10;
+      return (t === 1 ? "十" : KAN[t] + "十") + (o ? KAN[o] : "");
+    }
     function kanjiDay(d) {
       var t = Math.floor(d / 10), o = d % 10;
       var tens = t === 0 ? "" : (t === 1 ? "十" : KAN[t] + "十");
       return tens + (o ? KAN[o] : (t ? "" : KAN[d])) + "日";
     }
     function kanjiTime(c) {
-      var h = HOURS[c.h24 % 24] || "零";
+      var h = kanjiHour(c.h24);
       var m = MINS[Math.floor(c.min / 5)];
       return h + "時" + (m ? m + "分" : "");
     }
@@ -886,7 +906,14 @@
 
       frame: function (env, dt) {
         var c = env.ctx, w = env.w, h = env.h, ck = env.clock, now = env.now;
+        var st = skyState(ck);
+        var lit = clamp(st.light, 0, 1), wm = st.warm;
         c.drawImage(this.tex, -10, -10, w + 20, h + 20);
+
+        // 紙を照らす光（夜は暖色のランプ、昼は白い外光、暮れは橙）
+        var wash = lerpRgb(lerpRgb(hexRgb("#100c08"), hexRgb("#c9c4b8"), lit), hexRgb("#e0915a"), wm * 0.7);
+        c.fillStyle = css(wash, (0.05 + 0.10 * lit + 0.06 * wm).toFixed(3));
+        c.fillRect(-20, -20, w + 40, h + 40);
 
         var cx = w * 0.5, cy = h * 0.5;
         var big = Math.round(Math.min(w, h) * 0.22);
